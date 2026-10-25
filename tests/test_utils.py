@@ -1,7 +1,8 @@
 import unittest
 import os
 from galup.utils import (sanitize_identifier, check_is_file_empty,
-                         get_itemname, get_filename, get_post_name)
+                         get_itemname, get_filename, get_post_name,
+                         get_thumbnail_url)
 
 
 class UtilsTest(unittest.TestCase):
@@ -101,6 +102,24 @@ class UtilsTest(unittest.TestCase):
         ]
         self.assertEqual([get_filename(meta) for meta, _ in cases],
                          [name for _, name in cases])
+
+    def test_get_thumbnail_url(self):
+        cases = [
+            ({'video': {'cover': 'https://t.co/c.jpg',
+                        'originCover': 'https://t.co/o.jpg'}},
+             'https://t.co/o.jpg'),
+            ({'imagePost': {'cover': {'imageURL': {
+                'urlList': ['https://t.co/s.jpg', 'https://t.co/s2.jpg']}}}},
+             'https://t.co/s.jpg'),
+            ({'thumbnail': 'https://b.thumbs.redditmedia.com/x.jpg'},
+             'https://b.thumbs.redditmedia.com/x.jpg'),
+            # Reddit uses words for posts without a thumbnail
+            ({'thumbnail': 'self'}, None),
+            ({'imagePost': {'cover': {'imageURL': {'urlList': []}}}}, None),
+            ({'title': 'nothing'}, None),
+        ]
+        self.assertEqual([get_thumbnail_url(meta) for meta, _ in cases],
+                         [url for _, url in cases])
 
     def test_check_is_file_empty_when_file_is_empty(self):
         # Create a file for the test

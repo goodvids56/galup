@@ -9,8 +9,10 @@ from internetarchive.config import parse_config_file
 from datetime import datetime
 from gallery_dl import config as gdl_config
 from gallery_dl import exception as gdl_exception
+from gallery_dl import text as gdl_text
 from gallery_dl.job import DownloadJob
-from .utils import get_itemname, get_filename, get_post_name
+from .utils import (get_itemname, get_filename, get_post_name,
+                    get_thumbnail_url)
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -22,6 +24,7 @@ DOWNLOAD_DIR_NAME = 'downloads'
 VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
                     'ts', 'mpg', 'mpeg', '3gp'}
 AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'bmp'}
 
 # Profile URLs of uploaders by gallery-dl category, used for the `channel`
 # metadata
@@ -39,7 +42,8 @@ class GalleryJob(DownloadJob):
     """
     gallery-dl DownloadJob that reports every file it downloads (or finds
     already on disk) together with the post it belongs to, and can skip posts
-    whose archive.org item already exists.
+    whose archive.org item already exists. After the files of a post, it
+    downloads the post's thumbnail, if its metadata has one, to `{id}.{ext}`.
 
     Child jobs (e.g. the posts of a user profile) are created by gallery-dl
     with `self.__class__(extractor, parent)`, so the callbacks are inherited
@@ -54,6 +58,9 @@ class GalleryJob(DownloadJob):
         self.on_file = on_file
         self.should_skip = should_skip
         self.post_name = None
+        # Metadata and downloaded files of the current post
+        self.post_kwdict = None
+        self.post_files = []
 
     def initialize(self, kwdict=None):
         DownloadJob.initialize(self, kwdict)
@@ -69,9 +76,54 @@ class GalleryJob(DownloadJob):
         # after its ID; this names the post's .info.json, written by
         # gallery-dl's metadata post processor (see
         # `GalUp.generate_gdl_options`), and its archive.org item.
+        self.download_thumbnail()
         self.post_name = get_post_name(kwdict)
+        self.post_kwdict = kwdict
+        self.post_files = []
         kwdict['_galup_post'] = self.post_name
         DownloadJob.handle_directory(self, kwdict)
+
+    def handle_finalize(self):
+        try:
+            self.download_thumbnail()
+        except Exception as exc:
+            self.extractor.log.warning('Failed to download thumbnail (%s: %s)',
+                                       exc.__class__.__name__, exc)
+        DownloadJob.handle_finalize(self)
+
+    def download_thumbnail(self):
+        """
+        Download the thumbnail of the current post to `{id}.{ext}`, once all
+        its files have been downloaded.
+        """
+        kwdict, self.post_kwdict = self.post_kwdict, None
+        if kwdict is None or not self.post_files:
+            return
+        url = get_thumbnail_url(kwdict)
+        if url is None:
+            return
+
+        # A post with a single image is named `{id}.{ext}` already, and is
+        # its own thumbnail
+        for filepath in self.post_files:
+            name, extension = os.path.splitext(os.path.basename(filepath))
+            extension = extension[1:].lower()
+            if name == self.post_name and \
+                    extension not in VIDEO_EXTENSIONS | AUDIO_EXTENSIONS:
+                return
+
+        thumbnail = dict(kwdict)
+        gdl_text.nameext_from_url(url, thumbnail)
+        if thumbnail.get('extension', '').lower() not in IMAGE_EXTENSIONS:
+            # gallery-dl corrects it from the downloaded file if needed
+            thumbnail['extension'] = 'jpg'
+        thumbnail.pop('num', None)
+        thumbnail.update({
+            'type': 'thumbnail',
+            'file_url': url,
+            '_galup_filename': self.post_name,
+        })
+        DownloadJob.handle_url(self, url, thumbnail)
 
     def handle_url(self, url, kwdict):
         # Used by the default filename format, see `GalUp.generate_gdl_options`
@@ -91,6 +143,7 @@ class GalleryJob(DownloadJob):
     def _report_file(self, pathfmt):
         filepath = pathfmt.realpath
         if filepath and os.path.isfile(filepath):
+            self.post_files.append(filepath)
             # Where gallery-dl's metadata post processor writes the post's
             # .info.json, without the .info.json extension
             post_basename = pathfmt.realdirectory + pathfmt.clean_path(
@@ -369,9 +422,11 @@ class GalUp(object):
 
         # Build the item metadata from its main file: a video if there is
         # one, otherwise an image, e.g. the slides of a TikTok slideshow
-        # rather than its background music.
+        # rather than its background music, but never the thumbnail.
         def file_priority(file):
             extension = str(file[1].get('extension') or '').lower()
+            if file[1].get('type') == 'thumbnail':
+                return 3
             if extension in VIDEO_EXTENSIONS:
                 return 0
             if extension in AUDIO_EXTENSIONS:

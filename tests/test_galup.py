@@ -514,10 +514,15 @@ class GalUpTests(unittest.TestCase):
                 post_basename = os.path.join(post_dir, post['id'])
                 with open(post_basename + '.info.json', 'w') as f:
                     json.dump(post, f)
-                for num, extension in ((1, 'jpg'), (2, 'jpg'), (0, 'mp3')):
+                for num, extension in ((1, 'jpg'), (2, 'jpg'), (0, 'mp3'),
+                                       (None, 'jpg')):
                     kwdict = dict(post, num=num, extension=extension)
+                    name = get_filename(kwdict)
+                    if num is None:
+                        # The slideshow's thumbnail
+                        kwdict['type'] = 'thumbnail'
                     filepath = os.path.join(post_dir, '%s.%s' % (
-                        get_filename(kwdict), extension))
+                        name, extension))
                     with open(filepath, 'wb') as f:
                         f.write(b'data')
                     self.on_file(filepath, kwdict, page_url, post_basename)
@@ -553,9 +558,11 @@ class GalUpTests(unittest.TestCase):
         self.assertEqual(identifier, itemname)
         # The images decide the mediatype, not the background music
         self.assertEqual(meta['mediatype'], 'image')
+        self.assertEqual(meta['title'], 'Educational video! #fyp #中国人')
         self.assertEqual(uploaded, [
-            '7700361800876920077.info.json', '7700361800876920077.mp3',
-            '7700361800876920077_1.jpg', '7700361800876920077_2.jpg'])
+            '7700361800876920077.info.json', '7700361800876920077.jpg',
+            '7700361800876920077.mp3', '7700361800876920077_1.jpg',
+            '7700361800876920077_2.jpg'])
 
 
 class FakeSiteExtractor(Extractor):
@@ -580,6 +587,36 @@ class FakeSiteExtractor(Extractor):
 gdl_extractor.add(FakeSiteExtractor)
 
 
+class FakeThumbnailExtractor(Extractor):
+    """A gallery-dl extractor for posts with a thumbnail"""
+    category = 'galupthumbs'
+    subcategory = 'user'
+    directory_fmt = ('{category}', '{user}')
+    pattern = r'galupthumbs:user'
+
+    def items(self):
+        posts = (
+            # A video
+            ('201', ['https://example.org/201/video.mp4']),
+            # A single image, which is its own thumbnail
+            ('202', ['https://example.org/202/image.jpg']),
+            # Several images
+            ('203', ['https://example.org/203/1.jpg',
+                     'https://example.org/203/2.jpg']),
+        )
+        for post_id, urls in posts:
+            post = {'id': post_id, 'user': 'someone',
+                    'thumbnail': 'https://example.org/%s/thumb.jpg' % post_id}
+            yield Message.Directory, '', post
+            for num, url in enumerate(urls, 1):
+                file = dict(post, num=num, count=len(urls))
+                text.nameext_from_url(url, file)
+                yield Message.Url, url, file
+
+
+gdl_extractor.add(FakeThumbnailExtractor)
+
+
 class GalleryJobTests(unittest.TestCase):
     """Run the real gallery-dl machinery against a mocked direct link."""
 
@@ -594,6 +631,7 @@ class GalleryJobTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(downloads_path('directlink'), ignore_errors=True)
         shutil.rmtree(downloads_path('galuptest'), ignore_errors=True)
+        shutil.rmtree(downloads_path('galupthumbs'), ignore_errors=True)
 
     def on_file(self, filepath, kwdict, page_url, post_basename):
         self.reported.append((filepath, kwdict['category'], page_url,
@@ -661,3 +699,29 @@ class GalleryJobTests(unittest.TestCase):
             self.assertEqual(json.load(f), {
                 'id': '102', 'user': 'someone', 'title': 'Post 102',
                 'category': 'galuptest', 'subcategory': 'user'})
+
+    def test_downloads_thumbnail_of_post(self):
+        with requests_mock.Mocker() as m:
+            m.get(re.compile(r'https://example\.org/.*\.mp4'),
+                  content=b'video', headers={'content-type': 'video/mp4'})
+            m.get(re.compile(r'https://example\.org/.*\.jpg'),
+                  content=b'image', headers={'content-type': 'image/jpeg'})
+            GalleryJob('galupthumbs:user', on_file=self.on_file).run()
+
+            thumbnails = sorted(request.path for request in m.request_history
+                                if request.path.endswith('/thumb.jpg'))
+
+        user_dir = downloads_path('galupthumbs', 'someone')
+        self.assertEqual(sorted(os.listdir(user_dir)), [
+            '201.info.json', '201.jpg', '201.mp4',
+            '202.info.json', '202.jpg',
+            '203.info.json', '203.jpg', '203_1.jpg', '203_2.jpg'])
+        # The single image post isn't given a thumbnail
+        self.assertEqual(thumbnails, ['/201/thumb.jpg', '/203/thumb.jpg'])
+
+        # Thumbnails are reported as files of their post
+        reported = [(os.path.basename(filepath),
+                     os.path.basename(post_basename))
+                    for filepath, _, _, post_basename in self.reported]
+        self.assertIn(('201.jpg', '201'), reported)
+        self.assertIn(('203.jpg', '203'), reported)

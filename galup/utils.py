@@ -146,6 +146,45 @@ def get_filename(file_meta):
     return post_id
 
 
+# gallery-dl metadata keys that can hold the URL of a post's thumbnail, in
+# order of preference. Nested keys are written as tuples, with list indexes
+# as numbers.
+THUMBNAIL_KEYS = (
+    ('video', 'originCover'),   # tiktok videos
+    ('video', 'cover'),
+    ('imagePost', 'cover', 'imageURL', 'urlList', 0),   # tiktok slideshows
+    'thumbnail',                # reddit, nhentai, ...
+    'thumbnail_url',
+    'thumbnailUrl',
+    'thumb',
+    'thumb_url',
+    'cover',
+    'cover_url',
+    'poster',
+    'poster_url',
+    'preview_url',
+)
+
+
+def get_thumbnail_url(post_meta):
+    """
+    Return the URL of a post's thumbnail found in its gallery-dl metadata,
+    or None.
+    """
+    for key in THUMBNAIL_KEYS:
+        value = post_meta
+        for part in (key if isinstance(key, tuple) else (key,)):
+            if isinstance(part, int):
+                value = value[part] if isinstance(value, list) and \
+                    len(value) > part else None
+            else:
+                value = value.get(part) if isinstance(value, dict) else None
+        if isinstance(value, str) and value.startswith(('http://',
+                                                        'https://')):
+            return value
+    return None
+
+
 def get_post_name(post_meta):
     """
     Name a post from its gallery-dl metadata: its ID, or for posts without
