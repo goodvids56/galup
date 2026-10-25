@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-SCANNER = 'galup (gallery-dl fork of TubeUp) {}'.format(__version__)
+SCANNER = 'GalUp Image Video Mirroring Application {}'.format(__version__)
 
 TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
 TWEET_BASENAME = 'twitter_1700000000000000001_1'

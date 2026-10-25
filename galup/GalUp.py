@@ -550,7 +550,7 @@ class GalUp(object):
             # Set 'scanner' metadata pair to allow tracking of galup
             # powered uploads, per request from archive.org. This fork
             # identifies itself separately from upstream TubeUp.
-            scanner='galup (gallery-dl fork of TubeUp) {}'.format(__version__))
+            scanner='GalUp Image Video Mirroring Application {}'.format(__version__))
 
         if file_meta.get('file_url'):
             metadata['source'] = file_meta['file_url']
