@@ -12,7 +12,7 @@ from datetime import datetime
 from gallery_dl import config as gdl_config
 from gallery_dl import exception as gdl_exception
 from gallery_dl.job import DownloadJob
-from .utils import get_itemname
+from .utils import get_itemname, get_filename
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -24,6 +24,17 @@ DOWNLOAD_DIR_NAME = 'downloads'
 VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
                     'ts', 'mpg', 'mpeg', '3gp'}
 AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
+
+# Profile URLs of uploaders by gallery-dl category, used for the `channel`
+# metadata
+CHANNEL_URLS = {
+    'bluesky': 'https://bsky.app/profile/{username}',
+    'deviantart': 'https://www.deviantart.com/{username}',
+    'instagram': 'https://www.instagram.com/{username}/',
+    'reddit': 'https://www.reddit.com/user/{username}',
+    'tiktok': 'https://www.tiktok.com/@{username}',
+    'twitter': 'https://x.com/{username}',
+}
 
 
 class GalleryJob(DownloadJob):
@@ -54,6 +65,9 @@ class GalleryJob(DownloadJob):
                              'skip': self._report_file})
 
     def handle_url(self, url, kwdict):
+        # Used by the default filename format, see `GalUp.generate_gdl_options`
+        kwdict['_galup_filename'] = (get_filename(kwdict) or
+                                     kwdict.get('filename') or 'file')
         if self.should_skip is not None:
             if self.pathfmt is None:
                 self.initialize(kwdict)
@@ -97,7 +111,9 @@ class GalUp(object):
                                 be used in uploading the file.
         :param output_template: A gallery-dl filename format string that will
                                 be used to generate the output filenames.
-                                Defaults to each extractor's own format.
+                                Defaults to `{id}.{extension}`, or
+                                `{id}_{num}.{extension}` for posts with
+                                several files.
         """
         self.dir_path = dir_path
         self.verbose = verbose
@@ -273,8 +289,10 @@ class GalUp(object):
             'url-metadata': 'file_url',
         }
 
-        if self.output_template is not None:
-            extractor_opts['filename'] = self.output_template
+        # Name files `{id}.{extension}`, or `{id}_{num}.{extension}` when a
+        # post has several files, e.g. `{id}_1.jpg` (see `get_filename`)
+        extractor_opts['filename'] = (self.output_template or
+                                      '{_galup_filename}.{extension}')
 
         if cookie_file is not None:
             extractor_opts['cookies'] = cookie_file
@@ -494,6 +512,37 @@ class GalUp(object):
         return licenseurl
 
     @staticmethod
+    def determine_channel(file_meta, username):
+        """
+        Determine the URL of the uploader's profile, like TubeUp's `channel`.
+
+        :param file_meta:  gallery-dl metadata of the file.
+        :param username:   Username of the uploader, or None if unknown.
+        :return:           Profile URL, or None if unknown.
+        """
+        for key in ('uploader_url', 'channel_url', 'author_url', 'user_url',
+                    'profile_url'):
+            value = file_meta.get(key)
+            if isinstance(value, str) and value.startswith('http'):
+                return value
+
+        category = file_meta.get('category')
+        user = file_meta.get('user')
+        if category == 'pixiv' and isinstance(user, dict) and user.get('id'):
+            return 'https://www.pixiv.net/users/%s' % user['id']
+        if category == 'kemono' and file_meta.get('service') and user:
+            return 'https://kemono.cr/%s/user/%s' % (file_meta['service'],
+                                                     user)
+        blog = file_meta.get('blog')
+        if category == 'tumblr' and isinstance(blog, dict) and \
+                blog.get('url'):
+            return blog['url']
+
+        if username and category in CHANNEL_URLS:
+            return CHANNEL_URLS[category].format(username=username)
+        return None
+
+    @staticmethod
     def _first_text(file_meta, keys, dict_keys=('name', 'username', 'nick')):
         """
         Return the first non-empty string value found under one of `keys`.
@@ -549,13 +598,14 @@ class GalUp(object):
         # is stable and unique. Extractors store it differently, e.g.
         # `author[name]` (twitter), `author[uniqueId]` (tiktok),
         # `author[handle]` (bluesky) or `user[account]` (pixiv).
+        username = GalUp._first_text(
+            file_meta, ('username', 'author', 'user', 'uploader', 'owner',
+                        'creator', 'artist', 'blog_name'),
+            dict_keys=('username', 'account', 'handle', 'uniqueId',
+                       'screen_name', 'name'))
         # Some services don't tell you the uploader,
         # use our program's name in that case.
-        uploader = GalUp._first_text(
-            file_meta, ('username', 'author', 'user', 'uploader', 'owner',
-                        'creator', 'artist'),
-            dict_keys=('username', 'account', 'handle', 'uniqueId',
-                       'screen_name', 'name')) or 'galup'
+        uploader = username or 'galup'
 
         try:  # some files don't give an upload date
             d = datetime.fromisoformat(str(file_meta['date']))
@@ -611,7 +661,9 @@ class GalUp(object):
             # identifies itself separately from upstream TubeUp.
             scanner='GalUp Image Video Mirroring Application {}'.format(__version__))
 
-        if file_meta.get('file_url'):
-            metadata['source'] = file_meta['file_url']
+        # Link to the uploader's profile, like TubeUp's `channel`
+        channel = GalUp.determine_channel(file_meta, username)
+        if channel:
+            metadata['channel'] = channel
 
         return metadata

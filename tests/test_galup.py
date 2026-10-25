@@ -35,8 +35,8 @@ TWEET_METADATA = {
     'subject': 'twitter;image;art;mountains;',
     'originalurl': TWEET_URL,
     'licenseurl': '',
-    'source': 'https://pbs.twimg.com/media/F5aBcDeXYZ?format=jpg&name=orig',
-    'scanner': SCANNER}
+    'scanner': SCANNER,
+    'channel': 'https://x.com/example_artist'}
 
 
 def get_testfile_path(name):
@@ -167,7 +167,8 @@ class GalUpTests(unittest.TestCase):
             'extractor': {
                 'base-directory': self.tu.dir_path['downloads'],
                 'skip': True,
-                'url-metadata': 'file_url'},
+                'url-metadata': 'file_url',
+                'filename': '{_galup_filename}.{extension}'},
             'downloader': {
                 'part': True,
                 'retries': 9001},
@@ -294,6 +295,42 @@ class GalUpTests(unittest.TestCase):
             for category, meta in metas]
 
         self.assertEqual(result, expected)
+
+    def test_create_archive_org_metadata_from_gallerydl_meta_channel(self):
+        metas = [
+            {'category': 'tiktok', 'user': 'blossom_lovecn',
+             'author': {'uniqueId': 'blossom_lovecn'}},
+            {'category': 'bluesky',
+             'author': {'handle': 'someone.bsky.social'}},
+            {'category': 'pixiv', 'user': {'id': 42, 'account': 'acc'}},
+            {'category': 'kemono', 'service': 'patreon', 'user': '12345',
+             'username': 'creator'},
+            {'category': 'tumblr', 'blog_name': 'art',
+             'blog': {'name': 'art', 'url': 'https://art.tumblr.com/'}},
+            {'category': 'bellazon', 'author': 'someone',
+             'author_url': 'https://www.bellazon.com/main/profile/1-someone/'},
+        ]
+        expected = [
+            'https://www.tiktok.com/@blossom_lovecn',
+            'https://bsky.app/profile/someone.bsky.social',
+            'https://www.pixiv.net/users/42',
+            'https://kemono.cr/patreon/user/12345',
+            'https://art.tumblr.com/',
+            'https://www.bellazon.com/main/profile/1-someone/',
+        ]
+
+        result = [
+            GalUp.create_archive_org_metadata_from_gallerydl_meta(
+                meta, 'x').get('channel')
+            for meta in metas]
+
+        self.assertEqual(result, expected)
+
+    def test_create_archive_org_metadata_from_gallerydl_meta_no_channel(self):
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
+            {'category': 'directlink'}, 'x')
+
+        self.assertNotIn('channel', result)
 
     def test_create_archive_org_metadata_from_gallerydl_meta_no_date(self):
         vid_meta = load_tweet_meta()

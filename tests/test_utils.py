@@ -1,6 +1,7 @@
 import unittest
 import os
-from galup.utils import sanitize_identifier, check_is_file_empty, get_itemname
+from galup.utils import (sanitize_identifier, check_is_file_empty,
+                         get_itemname, get_filename)
 
 
 class UtilsTest(unittest.TestCase):
@@ -81,6 +82,30 @@ class UtilsTest(unittest.TestCase):
             'tiktok-7700361800876920077-Educational---fyp------------'
             '7686696195469609741-')
         self.assertRegex(itemname, r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{4,100}$')
+
+    def test_get_filename(self):
+        tiktok = {'category': 'tiktok', 'id': '7700361800876920077'}
+        cases = [
+            # TikTok slideshow images and its background music
+            (dict(tiktok, num=1), '7700361800876920077_1'),
+            (dict(tiktok, num=2), '7700361800876920077_2'),
+            (dict(tiktok, num=0), '7700361800876920077'),
+            # TikTok video
+            (tiktok, '7700361800876920077'),
+            # Tweets with one and with several images
+            ({'tweet_id': 17, 'num': 1, 'count': 1}, '17'),
+            ({'tweet_id': 17, 'num': 3, 'count': 4}, '17_3'),
+            # Manga chapters are numbered by page
+            ({'chapter_id': 'c1', 'page': 5}, 'c1_5'),
+            # Bunkr album files have no position but an ID of their own
+            ({'album_id': 'Xy7', 'id': 'f1'}, 'Xy7_f1'),
+            # Catbox album files only have their original name
+            ({'album_id': 'ab', 'filename': 'cat'}, 'ab_cat'),
+            # No post ID
+            ({'category': 'directlink', 'filename': 'image'}, None),
+        ]
+        self.assertEqual([get_filename(meta) for meta, _ in cases],
+                         [name for _, name in cases])
 
     def test_check_is_file_empty_when_file_is_empty(self):
         # Create a file for the test
