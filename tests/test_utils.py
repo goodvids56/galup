@@ -1,6 +1,6 @@
 import unittest
 import os
-from tubeup.utils import sanitize_identifier, check_is_file_empty, get_itemname
+from galup.utils import sanitize_identifier, check_is_file_empty, get_itemname
 
 
 class UtilsTest(unittest.TestCase):

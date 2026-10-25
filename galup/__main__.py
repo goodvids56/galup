@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# tubeup.py - Download media using gallery-dl and upload to the Internet Archive with metadata
+# galup.py - Download media using gallery-dl and upload to the Internet Archive with metadata
 #
 # This is a fork of TubeUp (https://github.com/bibanon/tubeup) that uses
 # gallery-dl to download.
@@ -18,13 +18,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""tubeup (gallery-dl fork) - Download media with gallery-dl, then upload to Internet Archive, passing all metadata.
+"""galup - Download media with gallery-dl, then upload to Internet Archive, passing all metadata.
 
 This is a fork of TubeUp (https://github.com/bibanon/tubeup) that uses gallery-dl
 to download. Report issues to https://github.com/goodvids56/galup/issues
 
 Usage:
-  tubeup <url>... [--username <user>] [--password <pass>]
+  galup <url>... [--username <user>] [--password <pass>]
                   [--metadata=<key:value>...]
                   [--cookies=<filename>]
                   [--proxy <prox>]
@@ -33,8 +33,8 @@ Usage:
                   [--output <output>]
                   [--dir <dir>]
                   [--ignore-existing-item]
-  tubeup -h | --help
-  tubeup --version
+  galup -h | --help
+  galup --version
 
 Arguments:
   <url>                         gallery-dl compatible URL to download.
@@ -63,9 +63,9 @@ import docopt
 import logging
 import traceback
 
-from tubeup.utils import key_value_to_dict
-from tubeup.TubeUp import TubeUp
-from tubeup import __version__
+from galup.utils import key_value_to_dict
+from galup.GalUp import GalUp
+from galup import __version__
 
 
 def main():
@@ -81,7 +81,7 @@ def main():
     debug_mode = args['--debug']
     use_download_archive = args['--use-download-archive']
     ignore_existing_item = args['--ignore-existing-item']
-    dir_path = args['--dir'] or '~/.tubeup'
+    dir_path = args['--dir'] or '~/.galup'
 
     if debug_mode:
         # Display log messages.
@@ -99,10 +99,10 @@ def main():
     metadata = key_value_to_dict(args['--metadata'])
 
     try:
-        tu = TubeUp(verbose=not quiet_mode,
-                    dir_path=dir_path,
-                    output_template=args['--output'])
-    except TubeUp.DirError as exc:
+        tu = GalUp(verbose=not quiet_mode,
+                   dir_path=dir_path,
+                   output_template=args['--output'])
+    except GalUp.DirError as exc:
         print('\n\033[91m'
               'Cannot use download directory: %s\n'
               '%s\n'

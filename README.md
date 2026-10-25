@@ -1,16 +1,16 @@
-Tubeup (gallery-dl fork) - a gallery-dl to Archive.org uploader
-==========================================
+galup - a gallery-dl to Archive.org uploader
+============================================
 
 ![Unit Tests](https://github.com/goodvids56/galup/workflows/Unit%20Tests/badge.svg)
 ![Lint](https://github.com/goodvids56/galup/workflows/Lint/badge.svg)
 
 > [!IMPORTANT]
-> **This is a fork.** This repository ([goodvids56/galup](https://github.com/goodvids56/galup)) is an unofficial fork of [Tubeup by the Bibliotheca Anonoma](https://github.com/bibanon/tubeup).
+> **This is a fork.** galup ([goodvids56/galup](https://github.com/goodvids56/galup)) is an unofficial fork of [Tubeup by the Bibliotheca Anonoma](https://github.com/bibanon/tubeup).
 > It replaces the downloader with [gallery-dl](https://codeberg.org/mikf/gallery-dl). It is not affiliated with or supported by the upstream Tubeup maintainers, gallery-dl or the Internet Archive.
 > Please report problems with this fork to [this fork's issue tracker](https://github.com/goodvids56/galup/issues), not to upstream Tubeup.
-> The upstream project, and the `tubeup` package on PyPI, are a different program.
+> Upstream Tubeup, and the `tubeup` package on PyPI, are a different program.
 
-This fork of `tubeup` uses gallery-dl to download images, galleries and other media (from [any site supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md)), and then uploads them with all metadata to the Internet Archive using the python module internetarchive.
+`galup` uses gallery-dl to download images, galleries and other media (from [any site supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md)), and then uploads them with all metadata to the Internet Archive using the python module internetarchive.
 
 The original Tubeup was designed by the [Bibliotheca Anonoma](https://github.com/bibanon/bibanon/wiki) to archive videos to the Internet Archive. This fork applies the same approach to everything gallery-dl can download: single posts, galleries, user profiles and so on.
 
@@ -28,7 +28,7 @@ Recommended system specifications:
 
 Installation via third-party package managers like Homebrew, MacPorts, or Linux system packages (apt, yum, etc.) *is not supported.*
 
-This fork is not published on PyPI. `pipx install tubeup` installs the **upstream** Tubeup, not this fork. Install this fork from its git repository as shown below.
+galup is not published on PyPI, so install it from its git repository as shown below. (`pipx install tubeup` installs upstream Tubeup, which is a different program.)
 
 
 1. Install `pipx` (typically `python3-pipx` or in Arch `python-pipx`), `git` and, optionally, `ffmpeg` (gallery-dl uses it for some formats, such as Pixiv ugoira animations).
@@ -48,7 +48,7 @@ Then run this to add pipx path to your shell RC file:
 ```
 
 
-2. Use pipx to install this fork. gallery-dl and internetarchive are installed with it as dependencies, and `--include-deps` also puts their `gallery-dl` and `ia` commands on your path.
+2. Use pipx to install galup. gallery-dl and internetarchive are installed with it as dependencies, and `--include-deps` also puts their `gallery-dl` and `ia` commands on your path.
 
 ```
     pipx install --include-deps git+https://github.com/goodvids56/galup.git
@@ -71,7 +71,7 @@ You will be prompted for your login credentials for the Internet Archive account
 5. Start archiving by running the script on a URL (or multiple URLs) [supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md). Depending on the site, this includes single posts, galleries and user profiles.
 
 ```
-    tubeup <url>
+    galup <url>
 ```
 
 Sites that need a login can use `--username`/`--password` or `--cookies`. Your regular [gallery-dl configuration file](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/configuration.rst) is loaded as well, so site credentials and options set there are used too.
@@ -84,10 +84,10 @@ Sites that need a login can use `--username`/`--password` or `--cookies`. Your r
 
 7. Upgrading
 
-Periodically *before* use, upgrade this fork and its python dependencies (including gallery-dl) by running:
+Periodically *before* use, upgrade galup and its python dependencies (including gallery-dl) by running:
 
 ```
-    pipx upgrade tubeup --pip-args="--upgrade-strategy eager"
+    pipx upgrade galup --pip-args="--upgrade-strategy eager"
 ```
 
 ## Windows Setup
@@ -105,7 +105,7 @@ Periodically *before* use, upgrade this fork and its python dependencies (includ
 
 ```
 Usage:
-  tubeup <url>... [--username <user>] [--password <pass>]
+  galup <url>... [--username <user>] [--password <pass>]
                   [--metadata=<key:value>...]
                   [--cookies=<filename>]
                   [--proxy <prox>]
@@ -114,8 +114,8 @@ Usage:
                   [--output <output>]
                   [--dir <dir>]
                   [--ignore-existing-item]
-  tubeup -h | --help
-  tubeup --version
+  galup -h | --help
+  galup --version
 ```
 ```
 Arguments:
@@ -148,7 +148,7 @@ For example, this script will upload images to the [Community Images collection]
 You can specify a different collection with the `--metadata` flag:
 
 ```
-    tubeup --metadata=collection:opensource_audio <url>
+    galup --metadata=collection:opensource_audio <url>
 ```
 
 Any arbitrary metadata can be added to the item, with a few exceptions.
@@ -177,12 +177,12 @@ Read the appropriate section [in this guide](https://archive.org/about/faqs.php#
 
 * Some content is blocked in certain countries. Use the proxy or torrenting/privacy VPN option to use a proxy to bypass this. Sweden and Germany are good countries to bypass geo-restrictions.
 * A site isn't working? Check whether plain `gallery-dl <url>` works first. If it doesn't, the problem is in gallery-dl or the site, and it should be reported to [gallery-dl's issue tracker](https://codeberg.org/mikf/gallery-dl/issues).
-* Upload taking forever? Getting s3 throttling on upload? Tubeup has specifically been tailored to wait the longest possible time before failing, and we've never seen a S3 outage that outlasted the insane wait times set in Tubeup. Disabling waits for S3 timeouts won't make the upload work, instead it will leave the downloaded contents on your disk in the downloads folder (`~/.tubeup/downloads`) because the download will immeaditly fail instead of gracefully waiting. The waits are a safety in case timeouts occur, do not disable them.
+* Upload taking forever? Getting s3 throttling on upload? galup (like upstream Tubeup) has specifically been tailored to wait the longest possible time before failing, and we've never seen a S3 outage that outlasted the insane wait times set in it. Disabling waits for S3 timeouts won't make the upload work, instead it will leave the downloaded contents on your disk in the downloads folder (`~/.galup/downloads`) because the download will immeaditly fail instead of gracefully waiting. The waits are a safety in case timeouts occur, do not disable them.
 
 
 ## Major Credits (in no particular order)
 
-This fork is built on the work of upstream Tubeup and its contributors:
+galup is built on the work of upstream Tubeup and its contributors:
 
 - [emijrp](https://github.com/emijrp/) who wrote the original [youtube2internetarchive.py](https://code.google.com/p/emijrp/source/browse/trunk/scrapers/youtube2internetarchive.py) in 2012
 - [Matt Hazinski](https://github.com/matthazinski) who forked emijrp's work in 2015 with numerous improvements of his own.
@@ -199,7 +199,7 @@ This fork is built on the work of upstream Tubeup and its contributors:
 
 Copyright (C) 2026 Bibliotheca Anonoma
 
-This fork is distributed under the same license as upstream Tubeup.
+galup is distributed under the same license as upstream Tubeup.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

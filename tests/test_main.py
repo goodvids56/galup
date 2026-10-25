@@ -1,6 +1,6 @@
 import docopt
 
-import tubeup.__main__ as cli
+import galup.__main__ as cli
 
 
 def test_proxy_short_option_sets_proxy():

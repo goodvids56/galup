@@ -9,14 +9,14 @@ import logging
 
 from datetime import datetime
 
-from tubeup.TubeUp import TubeUp, GalleryJob, DOWNLOAD_DIR_NAME
-from tubeup import __version__
+from galup.GalUp import GalUp, GalleryJob, DOWNLOAD_DIR_NAME
+from galup import __version__
 from unittest.mock import patch
 
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-SCANNER = 'TubeUp (gallery-dl fork) {}'.format(__version__)
+SCANNER = 'galup (gallery-dl fork of TubeUp) {}'.format(__version__)
 
 TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
 TWEET_BASENAME = 'twitter_1700000000000000001_1'
@@ -39,7 +39,7 @@ TWEET_METADATA = {
 
 
 def get_testfile_path(name):
-    return os.path.join(current_path, 'test_tubeup_files', name)
+    return os.path.join(current_path, 'test_galup_files', name)
 
 
 def load_tweet_meta():
@@ -48,7 +48,7 @@ def load_tweet_meta():
 
 
 def downloads_path(*names):
-    return os.path.join(current_path, 'test_tubeup_rootdir', 'downloads',
+    return os.path.join(current_path, 'test_galup_rootdir', 'downloads',
                         *names)
 
 
@@ -62,11 +62,11 @@ def mock_upload_response_by_basename(m, ia_id, basename):
               headers={'content-type': 'text/plain'})
 
 
-def copy_testfiles_to_tubeup_rootdir_test():
-    # Copy testfiles to rootdir path of TubeUp.
+def copy_testfiles_to_galup_rootdir_test():
+    # Copy testfiles to rootdir path of GalUp.
     # This method was created because after the uploading done by
     # internetarchive library, it deletes the files that has been uploaded.
-    testfiles_dir = os.path.join(current_path, 'test_tubeup_files',
+    testfiles_dir = os.path.join(current_path, 'test_galup_files',
                                  'files_for_upload_and_download_tests')
 
     for filepath in os.listdir(testfiles_dir):
@@ -104,16 +104,16 @@ class MockGalleryJob(object):
         return 0
 
 
-@patch("tubeup.TubeUp.GalleryJob", MockGalleryJob)
-class TubeUpTests(unittest.TestCase):
+@patch("galup.GalUp.GalleryJob", MockGalleryJob)
+class GalUpTests(unittest.TestCase):
 
     def setUp(self):
-        self.tu = TubeUp()
+        self.tu = GalUp()
         self.maxDiff = 999999999
 
     def test_set_dir_path(self):
         root_path = os.path.join(
-            current_path, '.directory_for_tubeup_set_dir_path_test')
+            current_path, '.directory_for_galup_set_dir_path_test')
         dir_paths_dict = dict(root=root_path,
                               downloads=os.path.join(root_path,
                                                      DOWNLOAD_DIR_NAME))
@@ -127,14 +127,14 @@ class TubeUpTests(unittest.TestCase):
         # Clean the test directory
         shutil.rmtree(root_path, ignore_errors=True)
 
-    def test_tubeup_attribute_logger_when_quiet_mode(self):
-        # self.tu is already `TubeUp` instance with quiet mode, so we don't
+    def test_galup_attribute_logger_when_quiet_mode(self):
+        # self.tu is already `GalUp` instance with quiet mode, so we don't
         # create a new instance here.
         self.assertIsInstance(self.tu.logger, logging.Logger)
         self.assertEqual(self.tu.logger.level, logging.ERROR)
 
-    def test_tubeup_attribute_logger_when_verbose_mode(self):
-        tu = TubeUp(verbose=True)
+    def test_galup_attribute_logger_when_verbose_mode(self):
+        tu = GalUp(verbose=True)
         self.assertIsInstance(tu.logger, logging.Logger)
 
     def test_determine_media_type(self):
@@ -155,7 +155,7 @@ class TubeUpTests(unittest.TestCase):
             ('audio', 'opensource_audio'))
 
     def test_gallery_job_is_a_gallery_dl_download_job(self):
-        # The class patch above only replaces the name used by TubeUp.py
+        # The class patch above only replaces the name used by GalUp.py
         from gallery_dl.job import DownloadJob
         self.assertTrue(issubclass(GalleryJob, DownloadJob))
 
@@ -203,14 +203,14 @@ class TubeUpTests(unittest.TestCase):
         self.assertEqual(result['extractor']['password'], 'testPassword')
 
     def test_generate_gdl_options_with_output_template(self):
-        tu = TubeUp(output_template='{category}_{id}.{extension}')
+        tu = GalUp(output_template='{category}_{id}.{extension}')
         result = tu.generate_gdl_options()
 
         self.assertEqual(result['extractor']['filename'],
                          '{category}_{id}.{extension}')
 
     def test_generate_gdl_options_with_verbose_mode(self):
-        tu = TubeUp(verbose=True)
+        tu = GalUp(verbose=True)
         result = tu.generate_gdl_options()
 
         self.assertEqual(result['output'], {'mode': 'auto', 'skip': True})
@@ -219,7 +219,7 @@ class TubeUpTests(unittest.TestCase):
         basename = downloads_path('write_info_json_test')
         os.makedirs(os.path.dirname(basename), exist_ok=True)
 
-        json_path = TubeUp.write_info_json(
+        json_path = GalUp.write_info_json(
             basename,
             {'category': 'twitter', 'id': 1, '_private': object(),
              'date': datetime(2023, 9, 8, 12, 34, 56)},
@@ -236,7 +236,7 @@ class TubeUpTests(unittest.TestCase):
         self.assertEqual(result['date'], '2023-09-08 12:34:56')
 
     def test_create_archive_org_metadata_from_gallerydl_meta(self):
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             load_tweet_meta(), TWEET_BASENAME)
 
         self.assertEqual(TWEET_METADATA, result)
@@ -245,7 +245,7 @@ class TubeUpTests(unittest.TestCase):
         vid_meta = load_tweet_meta()
         vid_meta['title'] = 'Mountain sketch'
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['title'], 'Mountain sketch')
@@ -255,17 +255,17 @@ class TubeUpTests(unittest.TestCase):
         del vid_meta['author']
         del vid_meta['user']
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
-        self.assertEqual(result['creator'], 'tubeup.py')
+        self.assertEqual(result['creator'], 'galup')
 
     def test_create_archive_org_metadata_from_gallerydl_meta_string_uploader(self):
         vid_meta = load_tweet_meta()
         del vid_meta['author']
         vid_meta['user'] = 'someone'
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['creator'], 'someone')
@@ -274,7 +274,7 @@ class TubeUpTests(unittest.TestCase):
         vid_meta = load_tweet_meta()
         del vid_meta['date']
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['date'], time.strftime("%Y-%m-%d"))
@@ -284,7 +284,7 @@ class TubeUpTests(unittest.TestCase):
         vid_meta = load_tweet_meta()
         vid_meta['content'] = None
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['description'], '')
@@ -295,7 +295,7 @@ class TubeUpTests(unittest.TestCase):
         vid_meta['category'] = 'danbooru'
         vid_meta['tags'] = 'mountain landscape sky'
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['subject'],
@@ -305,19 +305,19 @@ class TubeUpTests(unittest.TestCase):
         vid_meta = load_tweet_meta()
         vid_meta['tags'] = [f't{i}' for i in range(0, 300)]
 
-        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             vid_meta, TWEET_BASENAME)
 
         self.assertLessEqual(len(result['subject'].encode(encoding='utf-8')),
                              255, msg='tags_string not truncated to <= 255 bytes')
 
     def test_get_resource_basenames(self):
-        tu = TubeUp(dir_path=os.path.join(current_path,
-                                          'test_tubeup_rootdir'))
+        tu = GalUp(dir_path=os.path.join(current_path,
+                                         'test_galup_rootdir'))
 
-        copy_testfiles_to_tubeup_rootdir_test()
+        copy_testfiles_to_galup_rootdir_test()
 
-        with patch.object(TubeUp, 'apply_gdl_options'):
+        with patch.object(GalUp, 'apply_gdl_options'):
             result = tu.get_resource_basenames([TWEET_URL],
                                                ignore_existing_item=True)
 
@@ -329,15 +329,15 @@ class TubeUpTests(unittest.TestCase):
             self.assertEqual(json.load(f)['webpage_url'], TWEET_URL)
 
     def test_upload_ia(self):
-        tu = TubeUp(dir_path=os.path.join(current_path,
-                                          'test_tubeup_rootdir'),
-                    # Use custom ia configuration file so we don't need
-                    # to login with username and password.
-                    ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+        tu = GalUp(dir_path=os.path.join(current_path,
+                                         'test_galup_rootdir'),
+                   # Use custom ia configuration file so we don't need
+                   # to login with username and password.
+                   ia_config_path=get_testfile_path('ia_config_for_test.ini'))
 
         basename = downloads_path(TWEET_BASENAME)
 
-        copy_testfiles_to_tubeup_rootdir_test()
+        copy_testfiles_to_galup_rootdir_test()
 
         # A file whose name merely starts with the basename must not be
         # uploaded as part of this item.
@@ -369,13 +369,13 @@ class TubeUpTests(unittest.TestCase):
         os.remove(other_file)
 
     def test_upload_ia_incomplete_download(self):
-        tu = TubeUp(dir_path=os.path.join(current_path,
-                                          'test_tubeup_rootdir'),
-                    ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+        tu = GalUp(dir_path=os.path.join(current_path,
+                                         'test_galup_rootdir'),
+                   ia_config_path=get_testfile_path('ia_config_for_test.ini'))
 
         basename = downloads_path(TWEET_BASENAME)
 
-        copy_testfiles_to_tubeup_rootdir_test()
+        copy_testfiles_to_galup_rootdir_test()
         part_file = basename + '.jpg.part'
         with open(part_file, 'wb'):
             pass
@@ -387,16 +387,16 @@ class TubeUpTests(unittest.TestCase):
             os.remove(part_file)
 
     def test_archive_urls(self):
-        tu = TubeUp(dir_path=os.path.join(current_path,
-                                          'test_tubeup_rootdir'),
-                    ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+        tu = GalUp(dir_path=os.path.join(current_path,
+                                         'test_galup_rootdir'),
+                   ia_config_path=get_testfile_path('ia_config_for_test.ini'))
 
         basename = downloads_path(TWEET_BASENAME)
 
-        copy_testfiles_to_tubeup_rootdir_test()
+        copy_testfiles_to_galup_rootdir_test()
 
         with requests_mock.Mocker() as m, \
-                patch.object(TubeUp, 'apply_gdl_options'):
+                patch.object(GalUp, 'apply_gdl_options'):
             # Mock the request to s3.us.archive.org, so it will responds
             # a custom json. `internetarchive` library sends GET request to
             # that url to check that we don't violate the upload limit.
@@ -426,8 +426,8 @@ class GalleryJobTests(unittest.TestCase):
     IMAGE_URL = 'https://example.org/media/galleryjob_test.jpg'
 
     def setUp(self):
-        self.tu = TubeUp(dir_path=os.path.join(current_path,
-                                               'test_tubeup_rootdir'))
+        self.tu = GalUp(dir_path=os.path.join(current_path,
+                                              'test_galup_rootdir'))
         self.tu.apply_gdl_options(self.tu.generate_gdl_options())
         self.reported = []
 

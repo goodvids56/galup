@@ -16,7 +16,7 @@ from .utils import get_itemname
 from logging import getLogger
 from urllib.parse import urlparse
 
-from tubeup import __version__
+from galup import __version__
 
 
 DOWNLOAD_DIR_NAME = 'downloads'
@@ -74,17 +74,17 @@ class GalleryJob(DownloadJob):
             self.on_file(filepath, pathfmt.kwdict, self.extractor.url)
 
 
-class TubeUp(object):
+class GalUp(object):
     class DirError(Exception):
         pass
 
     def __init__(self,
                  verbose=False,
-                 dir_path='~/.tubeup',
+                 dir_path='~/.galup',
                  ia_config_path=None,
                  output_template=None):
         """
-        `tubeup` (gallery-dl fork) is a tool to archive images, galleries and
+        `galup` (a gallery-dl fork of TubeUp) is a tool to archive images, galleries and
         other media by downloading them with gallery-dl and uploading them to
         archive.org.
 
@@ -92,7 +92,7 @@ class TubeUp(object):
                                 printed out to stdout.
         :param dir_path:        A path to directory that will be used for
                                 saving the downloaded resources. Default to
-                               '~/.tubeup'.
+                               '~/.galup'.
         :param ia_config_path:  Path to an internetarchive config file, will
                                 be used in uploading the file.
         :param output_template: A gallery-dl filename format string that will
@@ -126,12 +126,12 @@ class TubeUp(object):
         try:
             dir_path = os.fspath(dir_path)
         except TypeError as exc:
-            raise TubeUp.DirError(
+            raise GalUp.DirError(
                 'Download directory must be a string or path-like object.'
             ) from exc
 
         if not dir_path or not dir_path.strip():
-            raise TubeUp.DirError('Download directory must not be empty.')
+            raise GalUp.DirError('Download directory must not be empty.')
 
         extended_usr_dir_path = os.path.abspath(os.path.expanduser(dir_path))
         downloads_dir_path = os.path.join(extended_usr_dir_path,
@@ -139,13 +139,13 @@ class TubeUp(object):
 
         if (os.path.exists(extended_usr_dir_path) and
                 not os.path.isdir(extended_usr_dir_path)):
-            raise TubeUp.DirError(
+            raise GalUp.DirError(
                 'Download root path "%s" already exists as a file. '
                 'Choose a different --dir to avoid data loss.'
                 % extended_usr_dir_path)
 
         if os.path.exists(downloads_dir_path) and not os.path.isdir(downloads_dir_path):
-            raise TubeUp.DirError(
+            raise GalUp.DirError(
                 'Download path "%s" already exists as a file. '
                 'Choose a different --dir to avoid data loss.'
                 % downloads_dir_path)
@@ -154,7 +154,7 @@ class TubeUp(object):
             os.makedirs(extended_usr_dir_path, exist_ok=True)
             os.makedirs(downloads_dir_path, exist_ok=True)
         except OSError as exc:
-            raise TubeUp.DirError(
+            raise GalUp.DirError(
                 'Cannot create download directory "%s": %s'
                 % (downloads_dir_path, exc)
             ) from exc
@@ -493,16 +493,16 @@ class TubeUp(object):
         category = file_meta.get('category') or 'gallery-dl'
         pageurl = file_meta.get('webpage_url') or file_meta.get('file_url') or ''
 
-        mediatype, collection = TubeUp.determine_media_type(file_meta, pageurl)
+        mediatype, collection = GalUp.determine_media_type(file_meta, pageurl)
 
-        title = TubeUp._first_text(file_meta, ('title', 'post_title')) or \
+        title = GalUp._first_text(file_meta, ('title', 'post_title')) or \
             '%s %s' % (category, basename)
 
         # Some services don't tell you the uploader,
         # use our program's name in that case.
-        uploader = TubeUp._first_text(
+        uploader = GalUp._first_text(
             file_meta, ('uploader', 'artist', 'author', 'user', 'username',
-                        'creator', 'owner')) or 'tubeup.py'
+                        'creator', 'owner')) or 'galup'
 
         try:  # some files don't give an upload date
             d = datetime.fromisoformat(str(file_meta['date']))
@@ -518,7 +518,7 @@ class TubeUp(object):
         tags_string = '%s;%s;' % (category, mediatype)
 
         for key in ('tags', 'hashtags', 'categories'):
-            for tag in TubeUp._tags_list(file_meta.get(key)):
+            for tag in GalUp._tags_list(file_meta.get(key)):
                 tags_string += '%s;' % tag
 
         # IA's subject field has a 255 bytes length limit, so we need to truncate tags_string
@@ -528,9 +528,9 @@ class TubeUp(object):
             tags_string = ';'.join(tags_list)
 
         # license
-        licenseurl = TubeUp.determine_licenseurl(file_meta)
+        licenseurl = GalUp.determine_licenseurl(file_meta)
 
-        description_text = TubeUp._first_text(
+        description_text = GalUp._first_text(
             file_meta, ('description', 'content', 'caption', 'text')) or ''
         # archive.org does not display raw newlines
         description = re.sub('\r?\n', '<br>', description_text)
@@ -547,10 +547,10 @@ class TubeUp(object):
             originalurl=pageurl,
             licenseurl=licenseurl,
 
-            # Set 'scanner' metadata pair to allow tracking of TubeUp
+            # Set 'scanner' metadata pair to allow tracking of galup
             # powered uploads, per request from archive.org. This fork
             # identifies itself separately from upstream TubeUp.
-            scanner='TubeUp (gallery-dl fork) {}'.format(__version__))
+            scanner='galup (gallery-dl fork of TubeUp) {}'.format(__version__))
 
         if file_meta.get('file_url'):
             metadata['source'] = file_meta['file_url']

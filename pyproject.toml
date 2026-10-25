@@ -3,12 +3,12 @@ requires = ["setuptools>=61.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tubeup"
+name = "galup"
 dynamic = ["version"]
 description = "gallery-dl to Archive.org uploader (a fork of TubeUp)"
 authors = [
     {name = "Bibliotheca Anonoma"},
-    {name = "galup fork contributors"}
+    {name = "galup contributors"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -54,7 +54,7 @@ issues = "https://github.com/goodvids56/galup/issues"
 upstream = "https://github.com/bibanon/tubeup"
 
 [project.scripts]
-tubeup = "tubeup.__main__:main"
+galup = "galup.__main__:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "tubeup.__version__"}
+version = {attr = "galup.__version__"}
