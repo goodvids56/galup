@@ -302,6 +302,29 @@ class GalUpTests(unittest.TestCase):
         self.assertEqual(result['subject'],
                          'danbooru;image;mountain;landscape;sky;')
 
+    def test_create_archive_org_metadata_from_gallerydl_meta_tiktok(self):
+        tiktok_meta = {
+            'category': 'tiktok',
+            'id': '7700361800876920077',
+            'desc': 'All love! #fyp #china #中国人',
+            'user': 'blossom_lovecn',
+            'author': {'uniqueId': 'blossom_lovecn'},
+            'extension': 'jpg',
+            'challenges': [{'id': '1', 'title': 'fyp'},
+                           {'id': '2', 'title': 'china'}],
+            'textExtra': [{'hashtagName': 'fyp'},
+                          {'hashtagName': 'china'},
+                          {'hashtagName': '中国人'},
+                          {'hashtagName': '', 'userUniqueId': 'someone'}],
+        }
+
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
+            tiktok_meta, 'x')
+
+        self.assertEqual(result['description'], 'All love! #fyp #china #中国人')
+        self.assertEqual(result['subject'], 'tiktok;image;fyp;china;中国人;')
+        self.assertEqual(result['creator'], 'blossom_lovecn')
+
     def test_create_archive_org_metadata_from_gallerydl_meta_mass_of_tags(self):
         vid_meta = load_tweet_meta()
         vid_meta['tags'] = [f't{i}' for i in range(0, 300)]

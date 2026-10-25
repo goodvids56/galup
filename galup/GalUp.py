@@ -517,7 +517,10 @@ class GalUp(object):
             tags = []
             for tag in value:
                 if isinstance(tag, dict):
-                    tag = tag.get('name')
+                    # TikTok uses `title` in `challenges` and `hashtagName`
+                    # in `textExtra`
+                    tag = (tag.get('name') or tag.get('title') or
+                           tag.get('hashtagName'))
                 if isinstance(tag, str) and tag:
                     tags.append(tag)
             return tags
@@ -561,9 +564,14 @@ class GalUp(object):
         # example: twitter;image;
         tags_string = '%s;%s;' % (category, mediatype)
 
-        for key in ('tags', 'hashtags', 'categories'):
+        tags = []
+        for key in ('tags', 'hashtags', 'categories', 'challenges',
+                    'textExtra'):
             for tag in GalUp._tags_list(file_meta.get(key)):
-                tags_string += '%s;' % tag
+                if tag not in tags:
+                    tags.append(tag)
+        for tag in tags:
+            tags_string += '%s;' % tag
 
         # IA's subject field has a 255 bytes length limit, so we need to truncate tags_string
         while len(tags_string.encode('utf-8')) > 255:
@@ -575,7 +583,8 @@ class GalUp(object):
         licenseurl = GalUp.determine_licenseurl(file_meta)
 
         description_text = GalUp._first_text(
-            file_meta, ('description', 'content', 'caption', 'text')) or ''
+            file_meta, ('description', 'content', 'caption', 'text',
+                        'desc')) or ''
         # archive.org does not display raw newlines
         description = re.sub('\r?\n', '<br>', description_text)
 
