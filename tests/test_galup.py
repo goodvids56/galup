@@ -8,12 +8,13 @@ import requests_mock
 import glob
 import logging
 
-from datetime import datetime
 
 from galup.GalUp import GalUp, GalleryJob, DOWNLOAD_DIR_NAME
 from galup.utils import get_filename
 from galup import __version__
 from unittest.mock import patch
+from gallery_dl import extractor as gdl_extractor, text
+from gallery_dl.extractor.common import Extractor, Message
 
 
 current_path = os.path.dirname(os.path.realpath(__file__))
@@ -49,6 +50,12 @@ def get_testfile_path(name):
 def load_tweet_meta():
     with open(get_testfile_path(TWEET_GDL_META)) as f:
         return json.load(f)
+
+
+def tweet_files():
+    """Files of the tweet as reported by `get_resource_basenames`"""
+    meta = load_tweet_meta()
+    return [(downloads_path(TWEET_BASENAME + '.jpg'), meta)]
 
 
 def downloads_path(*names):
@@ -104,7 +111,7 @@ class MockGalleryJob(object):
         kwdict = load_tweet_meta()
         del kwdict['webpage_url']
         self.on_file(downloads_path(TWEET_BASENAME + '.jpg'), kwdict,
-                     self.url)
+                     self.url, downloads_path(TWEET_BASENAME))
         return 0
 
 
@@ -171,7 +178,11 @@ class GalUpTests(unittest.TestCase):
                 'base-directory': self.tu.dir_path['downloads'],
                 'skip': True,
                 'url-metadata': 'file_url',
-                'filename': '{_galup_filename}.{extension}'},
+                'filename': '{_galup_filename}.{extension}',
+                'postprocessors': [{
+                    'name': 'metadata',
+                    'event': 'post',
+                    'filename': '{_galup_post}.info.json'}]},
             'downloader': {
                 'part': True,
                 'retries': 9001},
@@ -219,41 +230,6 @@ class GalUpTests(unittest.TestCase):
         result = tu.generate_gdl_options()
 
         self.assertEqual(result['output'], {'mode': 'auto', 'skip': True})
-
-    def test_write_info_json(self):
-        basename = downloads_path('write_info_json_test')
-        os.makedirs(os.path.dirname(basename), exist_ok=True)
-
-        post = {'category': 'tiktok', 'id': '1', 'title': 'Slides',
-                'date': datetime(2023, 9, 8, 12, 34, 56),
-                'webpage_url': TWEET_URL}
-        json_path = GalUp.write_info_json(basename, {
-            basename + '_1.jpg': dict(post, num=1, extension='jpg',
-                                      image={'imageWidth': 10}),
-            basename + '_2.jpg': dict(post, num=2, extension='jpg',
-                                      image={'imageWidth': 20}),
-        })
-
-        with open(json_path) as f:
-            result = json.load(f)
-        files = GalUp.load_info_json(basename)
-        os.remove(json_path)
-
-        self.assertEqual(json_path, basename + '.info.json')
-        self.assertEqual(result, {
-            'category': 'tiktok', 'id': '1', 'title': 'Slides',
-            'date': '2023-09-08 12:34:56', 'webpage_url': TWEET_URL,
-            'downloaded_files': [
-                {'downloaded_file': 'write_info_json_test_1.jpg', 'num': 1,
-                 'extension': 'jpg', 'image': {'imageWidth': 10}},
-                {'downloaded_file': 'write_info_json_test_2.jpg', 'num': 2,
-                 'extension': 'jpg', 'image': {'imageWidth': 20}},
-            ]})
-        self.assertEqual(files[1], (
-            basename + '_2.jpg',
-            {'category': 'tiktok', 'id': '1', 'title': 'Slides',
-             'date': '2023-09-08 12:34:56', 'webpage_url': TWEET_URL,
-             'num': 2, 'extension': 'jpg', 'image': {'imageWidth': 20}}))
 
     def test_create_archive_org_metadata_from_gallerydl_meta(self):
         result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
@@ -424,12 +400,8 @@ class GalUpTests(unittest.TestCase):
             result = tu.get_resource_basenames([TWEET_URL],
                                                ignore_existing_item=True)
 
-        expected_result = {downloads_path(TWEET_BASENAME)}
-
-        self.assertEqual(expected_result, result)
-
-        with open(downloads_path(TWEET_BASENAME + '.info.json')) as f:
-            self.assertEqual(json.load(f)['webpage_url'], TWEET_URL)
+        self.assertEqual(result, {
+            downloads_path(TWEET_BASENAME): dict(tweet_files())})
 
     def test_upload_ia(self):
         tu = GalUp(dir_path=os.path.join(current_path,
@@ -465,7 +437,7 @@ class GalUpTests(unittest.TestCase):
             # doesn't perform upload to the real archive.org server.
             mock_upload_response_by_basename(m, TWEET_ITEMNAME, basename)
 
-            result = tu.upload_ia(basename)
+            result = tu.upload_ia(basename, tweet_files())
 
         self.assertEqual((TWEET_ITEMNAME, TWEET_METADATA), result)
         self.assertTrue(os.path.exists(other_file))
@@ -485,7 +457,7 @@ class GalUpTests(unittest.TestCase):
 
         try:
             with self.assertRaisesRegex(Exception, 'Download incomplete'):
-                tu.upload_ia(basename)
+                tu.upload_ia(basename, tweet_files())
         finally:
             os.remove(part_file)
 
@@ -538,13 +510,17 @@ class GalUpTests(unittest.TestCase):
                 os.makedirs(post_dir, exist_ok=True)
                 post = {'category': 'tiktok', 'id': '7700361800876920077',
                         'title': 'Educational video! #fyp #中国人'}
+                # Written by gallery-dl's metadata post processor
+                post_basename = os.path.join(post_dir, post['id'])
+                with open(post_basename + '.info.json', 'w') as f:
+                    json.dump(post, f)
                 for num, extension in ((1, 'jpg'), (2, 'jpg'), (0, 'mp3')):
                     kwdict = dict(post, num=num, extension=extension)
                     filepath = os.path.join(post_dir, '%s.%s' % (
                         get_filename(kwdict), extension))
                     with open(filepath, 'wb') as f:
                         f.write(b'data')
-                    self.on_file(filepath, kwdict, page_url)
+                    self.on_file(filepath, kwdict, page_url, post_basename)
 
         itemname = 'tiktok-7700361800876920077'
         try:
@@ -582,6 +558,28 @@ class GalUpTests(unittest.TestCase):
             '7700361800876920077_1.jpg', '7700361800876920077_2.jpg'])
 
 
+class FakeSiteExtractor(Extractor):
+    """A gallery-dl extractor for two posts with two images each"""
+    category = 'galuptest'
+    subcategory = 'user'
+    directory_fmt = ('{category}', '{user}')
+    pattern = r'galuptest:user'
+
+    def items(self):
+        for post_id in ('101', '102'):
+            post = {'id': post_id, 'user': 'someone',
+                    'title': 'Post %s' % post_id}
+            yield Message.Directory, '', post
+            for num in (1, 2):
+                url = 'https://example.org/%s/%d.jpg' % (post_id, num)
+                file = dict(post, num=num)
+                text.nameext_from_url(url, file)
+                yield Message.Url, url, file
+
+
+gdl_extractor.add(FakeSiteExtractor)
+
+
 class GalleryJobTests(unittest.TestCase):
     """Run the real gallery-dl machinery against a mocked direct link."""
 
@@ -595,9 +593,11 @@ class GalleryJobTests(unittest.TestCase):
 
     def tearDown(self):
         shutil.rmtree(downloads_path('directlink'), ignore_errors=True)
+        shutil.rmtree(downloads_path('galuptest'), ignore_errors=True)
 
-    def on_file(self, filepath, kwdict, page_url):
-        self.reported.append((filepath, kwdict['category'], page_url))
+    def on_file(self, filepath, kwdict, page_url, post_basename):
+        self.reported.append((filepath, kwdict['category'], page_url,
+                              post_basename))
 
     def test_reports_downloaded_file(self):
         with requests_mock.Mocker() as m:
@@ -606,12 +606,21 @@ class GalleryJobTests(unittest.TestCase):
             GalleryJob(self.IMAGE_URL, on_file=self.on_file).run()
 
         self.assertEqual(len(self.reported), 1)
-        filepath, category, page_url = self.reported[0]
+        filepath, category, page_url, post_basename = self.reported[0]
         self.assertTrue(filepath.startswith(downloads_path('directlink')))
         self.assertTrue(filepath.endswith('galleryjob_test.jpg'))
         self.assertTrue(os.path.isfile(filepath))
         self.assertEqual(category, 'directlink')
         self.assertEqual(page_url, self.IMAGE_URL)
+
+        # gallery-dl's metadata post processor wrote the post's .info.json
+        self.assertEqual(post_basename,
+                         os.path.join(os.path.dirname(filepath),
+                                      'galleryjob_test'))
+        with open(post_basename + '.info.json') as f:
+            post_meta = json.load(f)
+        self.assertEqual(post_meta['category'], 'directlink')
+        self.assertNotIn('_galup_post', post_meta)
 
     def test_should_skip_prevents_download(self):
         checked = []
@@ -628,3 +637,27 @@ class GalleryJobTests(unittest.TestCase):
         self.assertEqual(len(checked), 1)
         self.assertTrue(checked[0].endswith('galleryjob_test'))
         self.assertEqual(self.reported, [])
+
+    def test_names_files_and_info_json_by_post(self):
+        with requests_mock.Mocker() as m:
+            m.get(re.compile(r'https://example\.org/.*'), content=b'image',
+                  headers={'content-type': 'image/jpeg'})
+            GalleryJob('galuptest:user', on_file=self.on_file).run()
+
+        user_dir = downloads_path('galuptest', 'someone')
+        self.assertEqual(sorted(os.listdir(user_dir)), [
+            '101.info.json', '101_1.jpg', '101_2.jpg',
+            '102.info.json', '102_1.jpg', '102_2.jpg'])
+        self.assertEqual(
+            [(os.path.basename(filepath), post_basename)
+             for filepath, _, _, post_basename in self.reported],
+            [('101_1.jpg', os.path.join(user_dir, '101')),
+             ('101_2.jpg', os.path.join(user_dir, '101')),
+             ('102_1.jpg', os.path.join(user_dir, '102')),
+             ('102_2.jpg', os.path.join(user_dir, '102'))])
+
+        # One .info.json per post, with gallery-dl's metadata of the post
+        with open(os.path.join(user_dir, '102.info.json')) as f:
+            self.assertEqual(json.load(f), {
+                'id': '102', 'user': 'someone', 'title': 'Post 102',
+                'category': 'galuptest', 'subcategory': 'user'})

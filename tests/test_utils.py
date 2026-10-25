@@ -1,7 +1,7 @@
 import unittest
 import os
 from galup.utils import (sanitize_identifier, check_is_file_empty,
-                         get_itemname, get_filename)
+                         get_itemname, get_filename, get_post_name)
 
 
 class UtilsTest(unittest.TestCase):
@@ -29,54 +29,49 @@ class UtilsTest(unittest.TestCase):
         clean = [sanitize_identifier(x) for x in bad]
         self.assertListEqual(expect, clean)
 
-    def test_get_itemname(self):
-        tiktok_basename = (
-            '/downloads/tiktok/user/7700361800876920077 Educational! '
-            '#fyp #中国人 #中国  [7686696195469609741]')
-        self.assertEqual(
-            get_itemname({'category': 'tiktok', 'id': '7700361800876920077'},
-                         tiktok_basename),
-            'tiktok-7700361800876920077')
-        self.assertEqual(
-            get_itemname({'category': 'twitter',
-                          'tweet_id': 1700000000000000001,
-                          'author': {'id': 123}},
-                         '/downloads/twitter/user/1700000000000000001_1'),
-            'twitter-1700000000000000001')
-        self.assertEqual(
-            get_itemname({'category': 'instagram', 'post_id': '31',
-                          'media_id': '32'}, 'x'),
-            'instagram-31')
-        self.assertEqual(
-            get_itemname({'category': 'boosty', 'id': 'file',
-                          'post': {'id': 'abc-123'}}, 'x'),
-            'boosty-abc-123')
-        self.assertEqual(
-            get_itemname({'category': 'bunkr', 'id': 'file',
-                          'album_id': 'Xy7'}, 'x'),
-            'bunkr-Xy7')
-        self.assertEqual(
-            get_itemname({'category': 'deviantart', 'index': 987}, 'x'),
-            'deviantart-987')
+    def test_get_post_name(self):
+        cases = [
+            ({'category': 'tiktok', 'id': '7700361800876920077'},
+             '7700361800876920077'),
+            ({'category': 'twitter', 'tweet_id': 1700000000000000001,
+              'author': {'id': 123}}, '1700000000000000001'),
+            ({'category': 'instagram', 'post_id': '31', 'media_id': '32'},
+             '31'),
+            ({'category': 'boosty', 'id': 'file', 'post': {'id': 'abc-123'}},
+             'abc-123'),
+            ({'category': 'bunkr', 'id': 'file', 'album_id': 'Xy7'}, 'Xy7'),
+            ({'category': 'deviantart', 'index': 987}, '987'),
+            # No post ID
+            ({'category': 'directlink', 'filename': 'image'}, 'image'),
+            ({'category': 'twitter', 'tweet_id': 0, 'filename': 'avatar'},
+             'avatar'),
+        ]
+        self.assertEqual([get_post_name(meta) for meta, _ in cases],
+                         [name for _, name in cases])
 
-    def test_get_itemname_without_post_id(self):
+        # Without a post ID or file name, posts are named after a hash of
+        # their metadata
+        name = get_post_name({'category': 'example', 'title': 'a'})
+        self.assertEqual(len(name), 16)
+        self.assertEqual(name, get_post_name({'title': 'a',
+                                              'category': 'example'}))
+        self.assertNotEqual(name, get_post_name({'category': 'example',
+                                                 'title': 'b'}))
+
+    def test_get_itemname(self):
+        self.assertEqual(get_itemname('tiktok', '7700361800876920077'),
+                         'tiktok-7700361800876920077')
         self.assertEqual(
-            get_itemname({'category': 'directlink'},
-                         'example.org_media_image'),
+            get_itemname('directlink', '/downloads/example.org_media_image'),
             'directlink-example-org_media_image')
-        self.assertEqual(
-            get_itemname({'category': 'twitter', 'tweet_id': 0},
-                         'avatar 2023'),
-            'twitter-avatar-2023')
-        self.assertEqual(get_itemname({}, 'image'), 'gallery-dl-image')
-        self.assertEqual(
-            len(get_itemname({'category': 'pixiv'}, 'x' * 200)), 100)
+        self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
+        self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
 
     def test_get_itemname_strips_non_ascii(self):
         itemname = get_itemname(
-            {'category': 'tiktok'},
-            '/downloads/tiktok/user/7700361800876920077 Educational! '
-            '#fyp #中国人 #中国  [7686696195469609741]')
+            'tiktok',
+            '7700361800876920077 Educational! #fyp #中国人 #中国  '
+            '[7686696195469609741]')
         self.assertEqual(
             itemname,
             'tiktok-7700361800876920077-Educational---fyp------------'

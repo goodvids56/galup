@@ -1,5 +1,7 @@
 import os
 import re
+import json
+import hashlib
 from collections import defaultdict
 
 
@@ -144,18 +146,32 @@ def get_filename(file_meta):
     return post_id
 
 
-def get_itemname(file_meta, basename):
+def get_post_name(post_meta):
     """
-    Build an archive.org identifier, `{platform}-{id}`, from the gallery-dl
-    metadata of a file. All files of the same post share one identifier.
-    Falls back to the basename of the downloaded file when the metadata has
-    no post ID.
+    Name a post from its gallery-dl metadata: its ID, or for posts without
+    one, the name of its file or a hash of the metadata.
     """
-    category = file_meta.get('category') or 'gallery-dl'
-    post_id = get_post_id(file_meta) or os.path.basename(basename)
+    post_id = get_post_id(post_meta)
+    if post_id is not None:
+        return post_id
+    filename = post_meta.get('filename')
+    if isinstance(filename, str) and filename:
+        return filename
+    meta = json.dumps(post_meta, sort_keys=True, default=str)
+    return hashlib.md5(meta.encode('utf-8')).hexdigest()[:16]
+
+
+def get_itemname(category, post_name):
+    """
+    Build an archive.org identifier, `{platform}-{id}`, from a gallery-dl
+    extractor category and the name of a post (see `get_post_name`).
+    """
     # Remove illegal characters in identifier; archive.org identifiers are
     # limited to 100 characters
-    return sanitize_identifier('%s-%s' % (category, post_id))[:100]
+    return sanitize_identifier('%s-%s' % (
+        category or 'gallery-dl',
+        os.path.basename(post_name),
+    ))[:100]
 
 
 def check_is_file_empty(filepath):
