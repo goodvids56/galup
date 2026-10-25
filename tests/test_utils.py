@@ -1,6 +1,6 @@
 import unittest
 import os
-from tubeup.utils import sanitize_identifier, check_is_file_empty
+from galup.utils import sanitize_identifier, check_is_file_empty, get_itemname
 
 
 class UtilsTest(unittest.TestCase):
@@ -27,6 +27,16 @@ class UtilsTest(unittest.TestCase):
         ]
         clean = [sanitize_identifier(x) for x in bad]
         self.assertListEqual(expect, clean)
+
+    def test_get_itemname(self):
+        self.assertEqual(
+            get_itemname('twitter', '/downloads/twitter/user/1700_1'),
+            'twitter-1700_1')
+        self.assertEqual(
+            get_itemname('directlink', 'example.org_media_image'),
+            'directlink-example-org_media_image')
+        self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
+        self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
 
     def test_check_is_file_empty_when_file_is_empty(self):
         # Create a file for the test

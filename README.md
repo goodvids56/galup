@@ -1,33 +1,43 @@
-Tubeup - a multi-VOD service to Archive.org uploader
-==========================================
+galup - a gallery-dl to Archive.org uploader
+============================================
 
-![Unit Tests](https://github.com/bibanon/tubeup/workflows/Unit%20Tests/badge.svg)
-![Lint](https://github.com/bibanon/tubeup/workflows/Lint/badge.svg)
+![Unit Tests](https://github.com/goodvids56/galup/workflows/Unit%20Tests/badge.svg)
+![Lint](https://github.com/goodvids56/galup/workflows/Lint/badge.svg)
 
-`tubeup` uses yt-dlp to download a Youtube video (or [any other provider supported by yt-dlp](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)), and then uploads it with all metadata to the Internet Archive using the python module internetarchive.
+> [!IMPORTANT]
+> **This is a fork.** galup ([goodvids56/galup](https://github.com/goodvids56/galup)) is an unofficial fork of [Tubeup by the Bibliotheca Anonoma](https://github.com/bibanon/tubeup).
+> It replaces the downloader with [gallery-dl](https://codeberg.org/mikf/gallery-dl). It is not affiliated with or supported by the upstream Tubeup maintainers, gallery-dl or the Internet Archive.
+> Please report problems with this fork to [this fork's issue tracker](https://github.com/goodvids56/galup/issues), not to upstream Tubeup.
+> Upstream Tubeup, and the `tubeup` package on PyPI, are a different program.
 
-It was designed by the [Bibliotheca Anonoma](https://github.com/bibanon/bibanon/wiki) to archive single videos, playlists (see warning below about more than video uploads) or accounts to the Internet Archive.
+`galup` uses gallery-dl to download images, galleries and other media (from [any site supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md)), and then uploads them with all metadata to the Internet Archive using the python module internetarchive.
+
+The original Tubeup was designed by the [Bibliotheca Anonoma](https://github.com/bibanon/bibanon/wiki) to archive videos to the Internet Archive. This fork applies the same approach to everything gallery-dl can download: single posts, galleries, user profiles and so on.
+
+Each downloaded file gets its own Archive.org item, together with an `.info.json` file containing the metadata gallery-dl collected for it. Images go to the [Community Images](https://archive.org/details/opensource_image) collection, videos to [Community Video](https://archive.org/details/opensource_movies) and audio to [Community Audio](https://archive.org/details/opensource_audio), unless you choose another collection with `--metadata`.
 
 ## Prerequisites
 
-This script strongly recommends Linux or some sort of POSIX system (such as macOS), preferably from a VPS or Linux/Unix shell you have access to..
+This script strongly recommends Linux or some sort of POSIX system (such as macOS), preferably from a VPS or Linux/Unix shell you have access to.
 
-Reccomended system specifications:
-- Linux VPS with Python 3.10 or higher, with `pipx` and `deno` installed
-- 2GB of RAM, 100GB of storage or much more for anything other than single short video mirroring. If your OS drive is too small, `symlink` it to something larger.
+Recommended system specifications:
+- Linux VPS with Python 3.10 or higher, with `pipx` installed
+- 2GB of RAM, 100GB of storage or much more for anything other than a few single posts. If your OS drive is too small, `symlink` it to something larger.
 
 ## Setup and Installation
 
 Installation via third-party package managers like Homebrew, MacPorts, or Linux system packages (apt, yum, etc.) *is not supported.*
 
+galup is not published on PyPI, so install it from its git repository as shown below. (`pipx install tubeup` installs upstream Tubeup, which is a different program.)
 
-1. Install `ffmpeg`, `pipx` (typically `python3-pipx` or in Arch `python-pipx`), `curl` and `deno`.  
+
+1. Install `pipx` (typically `python3-pipx` or in Arch `python-pipx`), `git` and, optionally, `ffmpeg` (gallery-dl uses it for some formats, such as Pixiv ugoira animations).
    To install ffmpeg in Ubuntu, enable the Universe repository.
 
 For Debian/Ubuntu:
 
 ```
-    sudo apt remove yt-dlp ; sudo apt install ffmpeg python3-pipx curl
+    sudo apt install ffmpeg python3-pipx git
 ```
 
 
@@ -38,17 +48,10 @@ Then run this to add pipx path to your shell RC file:
 ```
 
 
-Install Deno for challenge solving (external java script support required by yt-dlp for Youtube extractor):
+2. Use pipx to install galup. gallery-dl and internetarchive are installed with it as dependencies, and `--include-deps` also puts their `gallery-dl` and `ia` commands on your path.
 
 ```
-    curl -fsSL https://deno.land/install.sh | sh
-```
-
-
-2. Use pipx to install the required python packages. Yt-dlp requires it be installed into the `default` group, and `curl-cffi` improves success for some extractors.
-
-```
-    pipx install "yt-dlp[default,curl-cffi]" internetarchive tubeup
+    pipx install --include-deps git+https://github.com/goodvids56/galup.git
 ```
 
 
@@ -65,57 +68,44 @@ Install Deno for challenge solving (external java script support required by yt-
 You will be prompted for your login credentials for the Internet Archive account you use. Once configured to upload, you're ready to go.
 
 
-5. Start archiving a video by running the script on a URL (or multiple URLs) [supported by yt-dlp.](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md). For YouTube, this includes account URLs and playlist URLs.
+5. Start archiving by running the script on a URL (or multiple URLs) [supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md). Depending on the site, this includes single posts, galleries and user profiles.
 
 ```
-    tubeup <url>
+    galup <url>
 ```
 
+Sites that need a login can use `--username`/`--password` or `--cookies`. Your regular [gallery-dl configuration file](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/configuration.rst) is loaded as well, so site credentials and options set there are used too.
 
-6. Each archived video gets its own Archive.org item. Check out what you've uploaded at
+
+6. Each archived file gets its own Archive.org item. Check out what you've uploaded at
 
    `http://archive.org/details/@YOURUSERNAME`.
 
 
 7. Upgrading
 
-Periodically *before* use, upgrade `tubeup` its python dependencies and Deno by running:
+Periodically *before* use, upgrade galup and its python dependencies (including gallery-dl) by running:
 
 ```
-    pipx upgrade-all ; deno upgrade
-```
-To use a nightly yt-dlp build, inject it into your yt-dlp virtual environment [using the latest nightly build tag seen here](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases)
-
-```
-    pipx inject yt-dlp "yt-dlp[default,curl-cffi] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/[NIGHTLY TAG]/yt-dlp.tar.gz" --force ; pipx upgrade
+    pipx upgrade galup --pip-args="--upgrade-strategy eager"
 ```
 
-Where `[NIGHTLY TAG]` would for example be `2025.10.11.232807` in [this yt-dlp release](https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/tag/2025.10.11.232807).
-
-Upgrades will take it to latest nightly, which yt-dlp releases with a stable tag (see notes about upgrading below).
-
-## Docker
-
-Dockerized tubeup is provided by [etnguyen03/docker-tubeup](https://github.com/etnguyen03/docker-tubeup). Instructions are provided.
-   
 ## Windows Setup
 
 1. Install WSL2, pick a distribution of your choice. Ubuntu is popular, well-supported and used here as a example.
 2. Use Windows Terminal by Microsoft to interact with the WSL2 instance.
-3. Fully update the Linux installation. 
+3. Fully update the Linux installation.
    ```sudo apt update ; sudo apt upgrade```
-4. Install python `pipx`, `ffmpeg`.
-5. Install Deno 
-    ```curl -fsSL https://deno.land/install.sh | sh```
-6. Install Tubeup using steps 4-6 in the Linux configuration guide above and configuring `internetarchive` for your Archive.org account.
-7. Periodically update your distro repository packages, python packages and Deno. This command should be the same or similar to the one in the Linux guide.
+4. Install python `pipx`, `git` and optionally `ffmpeg`.
+5. Install this fork using steps 2-6 in the Linux configuration guide above and configure `internetarchive` for your Archive.org account.
+6. Periodically update your distro repository packages and python packages. This command should be the same or similar to the one in the Linux guide.
 
 
 ## Usage
 
 ```
 Usage:
-  tubeup <url>... [--username <user>] [--password <pass>]
+  galup <url>... [--username <user>] [--password <pass>]
                   [--metadata=<key:value>...]
                   [--cookies=<filename>]
                   [--proxy <prox>]
@@ -124,13 +114,13 @@ Usage:
                   [--output <output>]
                   [--dir <dir>]
                   [--ignore-existing-item]
-  tubeup -h | --help
-  tubeup --version
+  galup -h | --help
+  galup --version
 ```
 ```
 Arguments:
-  <url>                         yt-dlp compatible URL to download.
-                                Check yt-dlp documentation for a list
+  <url>                         gallery-dl compatible URL to download.
+                                Check gallery-dl documentation for a list
                                 of compatible websites.
   --metadata=<key:value>        Custom metadata to add to the archive.org
                                 item.
@@ -138,16 +128,15 @@ Arguments:
   
 Options:
   -h --help                    Show this screen.
-  -x --proxy <prox>            Use a proxy while uploading.
-  -u --username <user>         Provide a username, for sites like Nico Nico Douga.
-  -p --password <pass>         Provide a password, for sites like Nico Nico Douga.
-  -a --use-download-archive    Record the video url to the download archive.
-                               This will download only videos not listed in
-                               the archive file. Record the IDs of all
-                               downloaded videos in it.
+  -x --proxy <prox>            Use a proxy while downloading.
+  -u --username <user>         Provide a username, for sites that need a login.
+  -p --password <pass>         Provide a password, for sites that need a login.
+  -a --use-download-archive    Record downloaded files in the download archive.
+                               This will download only files not listed in
+                               the archive file.
   -q --quiet                   Just print errors.
   -d --debug                   Print all logs to stdout.
-  -o --output <output>         yt-dlp output template.
+  -o --output <output>         gallery-dl filename format string.
   -i --ignore-existing-item    Don't check if an item already exists on archive.org
 ```
 
@@ -155,11 +144,11 @@ Options:
 ## Metadata
 
 You can specify custom metadata with the `--metadata` flag.
-For example, this script will upload your video to the [Community Video collection](https://archive.org/details/opensource_movies) by default.
+For example, this script will upload images to the [Community Images collection](https://archive.org/details/opensource_image) by default.
 You can specify a different collection with the `--metadata` flag:
 
 ```
-    tubeup --metadata=collection:opensource_audio <url>
+    galup --metadata=collection:opensource_audio <url>
 ```
 
 Any arbitrary metadata can be added to the item, with a few exceptions.
@@ -168,51 +157,49 @@ You can learn more about archive.org metadata [here](https://archive.org/service
 
 ### Collections
 
-Archive.org users can upload to four open collections:
+Archive.org users can upload to these open collections:
 
+* [Community Images](https://archive.org/details/opensource_image) where the identifier is `opensource_image`.
 * [Community Audio](https://archive.org/details/opensource_audio) where the identifier is `opensource_audio`.
 * [Community Software](https://archive.org/details/open_source_software)  where the identifier is `opensource_software`.
 * [Community Texts](https://archive.org/details/opensource) where the identifier is `opensource`.
 * [Community Video](https://archive.org/details/opensource_movies) where the identifier is `opensource_movies`.
 
-Note that care should be taken when uploading entire channels.
-Read the appropriate section [in this guide](https://archive.org/about/faqs.php#Collections) for creating collections, and contact the [collections staff](mailto:collections-service@archive.org) if you're uploading a channel or multiple channels on one subject (gaming or horticulture for example). Internet Archive collections staff will either create a collection for you or merge any uploaded items based on the YouTube uploader name that are already up into a new collection.
+Note that care should be taken when uploading entire accounts or galleries.
+Read the appropriate section [in this guide](https://archive.org/about/faqs.php#Collections) for creating collections, and contact the [collections staff](mailto:collections-service@archive.org) if you're uploading an account or multiple accounts on one subject (art or photography for example). Internet Archive collections staff will either create a collection for you or merge any uploaded items based on the uploader name that are already up into a new collection.
 
-**Dumping entire channels into Community Video is abusive and may get your account locked.** _Talk to the Internet Archive admins first before doing large uploads; it's better to ask for guidence or help first than run afoul of the rules._
+**Dumping entire accounts into the community collections is abusive and may get your account locked.** Since this fork creates one item per file, a single gallery can produce many items. _Talk to the Internet Archive admins first before doing large uploads; it's better to ask for guidence or help first than run afoul of the rules._
 
 **If you do not own a collection you will need to be added as an admin for that collection if you want to upload to it.** Talk to the collection owner or staff if you need assistance with this.
 
 
 ## Troubleshooting
 
-* Some videos are copyright blocked in certain countries. Use the proxy or torrenting/privacy VPN option to use a proxy to bypass this. Sweden and Germany are good countries to bypass geo-restrictions.
-* Upload taking forever? Getting s3 throttling on upload? Tubeup has specifically been tailored to wait the longest possible time before failing, and we've never seen a S3 outage that outlasted the insane wait times set in Tubeup. Disabling waits for S3 timeouts won't make the upload work, instead it will leave the downloaded contents on your disk in the downloads folder (`~/.tubeup/downloads`) because the download will immeaditly fail instead of gracefully waiting. The waits are a safety in case timeouts occur, do not disable them.
-
-
-## A note on live videos
-
-- [yt-dlp cannot do simultaneous downloads, cannot prioritize live video first on Youtube over live chat](https://github.com/bibanon/tubeup/discussions/283#discussioncomment-5625558), This couldn't be fixed unless for YT which is what most people use it for, except by disabling livechat ripping to start video ripping, but even if that solution was acceptable by building in a flag on our end that disables chats to get video (again unacceptable) thats canceled by the next problem....
-
-- [yt-dlp has a unacceptably high failure rate with `--live-from-start` is called](https://github.com/bibanon/tubeup/issues/186#issuecomment-1127698704), sometimes the result doesn't mux, and in Twitches case is incomplete and isn't supported by all extractors. This flag is actually considered experimental by yt-dlp maintainers and has been said is unsuitable for archival purposes.
-
-Do not use Tubeup to archive live Youtube (or any other site) video. We will not/cannot fix it, it's not even our problem, and any solutions are unpalitable since they involve more code complexity to be maintained ontop of having to disable livechat for one extractor only for live video.
+* Some content is blocked in certain countries. Use the proxy or torrenting/privacy VPN option to use a proxy to bypass this. Sweden and Germany are good countries to bypass geo-restrictions.
+* A site isn't working? Check whether plain `gallery-dl <url>` works first. If it doesn't, the problem is in gallery-dl or the site, and it should be reported to [gallery-dl's issue tracker](https://codeberg.org/mikf/gallery-dl/issues).
+* Upload taking forever? Getting s3 throttling on upload? galup (like upstream Tubeup) has specifically been tailored to wait the longest possible time before failing, and we've never seen a S3 outage that outlasted the insane wait times set in it. Disabling waits for S3 timeouts won't make the upload work, instead it will leave the downloaded contents on your disk in the downloads folder (`~/.galup/downloads`) because the download will immeaditly fail instead of gracefully waiting. The waits are a safety in case timeouts occur, do not disable them.
 
 
 ## Major Credits (in no particular order)
+
+galup is built on the work of upstream Tubeup and its contributors:
 
 - [emijrp](https://github.com/emijrp/) who wrote the original [youtube2internetarchive.py](https://code.google.com/p/emijrp/source/browse/trunk/scrapers/youtube2internetarchive.py) in 2012
 - [Matt Hazinski](https://github.com/matthazinski) who forked emijrp's work in 2015 with numerous improvements of his own.
 - Antonizoon for switching the script to library calls rather than functioning as an external script, and many small improvements.
 - Small PRs from various people, both in and out of BibAnon.
-- vxbinaca for stabilizing downloads/uploads in `yt-dlp`/`internetarchive` library calls, cleansing item output, subtitles collection, and numerous small improvements over time.
+- vxbinaca for stabilizing download/upload library calls, cleansing item output, subtitles collection, and numerous small improvements over time.
 - mrpapersonic for adding logic to check if an item already exists in the Internet Archive and if so skips ingestion.
 - [Jake Johnson](https://github.com/jjjake) of the Internet Archive for adding variable collections ability as a flag, switching Tubeup from a script to PyPi repository, ISO-compliant item dates, fixing what others couldn't, and many improvements.
 - [Refeed](https://github.com/refeed) for re-basing the code to OOP, turning Tubeup itself into a library. and adding download and upload bar graphs, and squashing bugs.
+- [Mike Fährmann](https://codeberg.org/mikf) and contributors for [gallery-dl](https://codeberg.org/mikf/gallery-dl), which this fork uses to download.
 
 
 ## License (GPLv3)
 
 Copyright (C) 2026 Bibliotheca Anonoma
+
+galup is distributed under the same license as upstream Tubeup.
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -230,10 +217,10 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ## Star History
 
-<a href="https://star-history.dera.page/#bibanon/tubeup&Date">
+<a href="https://star-history.dera.page/#goodvids56/galup&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=bibanon/tubeup&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=bibanon/tubeup&type=Date" />
-   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=bibanon/tubeup&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=goodvids56/galup&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=goodvids56/galup&type=Date" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=goodvids56/galup&type=Date" />
  </picture>
 </a>

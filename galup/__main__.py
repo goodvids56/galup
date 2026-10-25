@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# tubeup.py - Download a video using youtube-dl and upload to the Internet Archive with metadata
+# galup.py - Download media using gallery-dl and upload to the Internet Archive with metadata
+#
+# This is a fork of TubeUp (https://github.com/bibanon/tubeup) that uses
+# gallery-dl to download.
 
 # Copyright (C) 2026 Bibliotheca Anonoma
 # This program is free software: you can redistribute it and/or modify
@@ -15,10 +18,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
-"""tubeup - Download a video with Youtube-dlc, then upload to Internet Archive, passing all metadata.
+"""galup - Download media with gallery-dl, then upload to Internet Archive, passing all metadata.
+
+This is a fork of TubeUp (https://github.com/bibanon/tubeup) that uses gallery-dl
+to download. Report issues to https://github.com/goodvids56/galup/issues
 
 Usage:
-  tubeup <url>... [--username <user>] [--password <pass>]
+  galup <url>... [--username <user>] [--password <pass>]
                   [--metadata=<key:value>...]
                   [--cookies=<filename>]
                   [--proxy <prox>]
@@ -27,12 +33,12 @@ Usage:
                   [--output <output>]
                   [--dir <dir>]
                   [--ignore-existing-item]
-  tubeup -h | --help
-  tubeup --version
+  galup -h | --help
+  galup --version
 
 Arguments:
-  <url>                         Youtube-dlc compatible URL to download.
-                                Check Youtube-dlc documentation for a list
+  <url>                         gallery-dl compatible URL to download.
+                                Check gallery-dl documentation for a list
                                 of compatible websites.
   --metadata=<key:value>        Custom metadata to add to the archive.org
                                 item.
@@ -40,16 +46,15 @@ Arguments:
 
 Options:
   -h --help                    Show this screen.
-  -x --proxy <prox>            Use a proxy while uploading.
-  -u --username <user>         Provide a username, for sites like Nico Nico Douga.
-  -p --password <pass>         Provide a password, for sites like Nico Nico Douga.
-  -a --use-download-archive    Record the video url to the download archive.
-                               This will download only videos not listed in
-                               the archive file. Record the IDs of all
-                               downloaded videos in it.
+  -x --proxy <prox>            Use a proxy while downloading.
+  -u --username <user>         Provide a username, for sites that need a login.
+  -p --password <pass>         Provide a password, for sites that need a login.
+  -a --use-download-archive    Record downloaded files in the download archive.
+                               This will download only files not listed in
+                               the archive file.
   -q --quiet                   Just print errors.
   -d --debug                   Print all logs to stdout.
-  -o --output <output>         Youtube-dlc output template.
+  -o --output <output>         gallery-dl filename format string.
   -i --ignore-existing-item    Don't check if an item already exists on archive.org
 """
 
@@ -58,9 +63,9 @@ import docopt
 import logging
 import traceback
 
-from tubeup.utils import key_value_to_dict
-from tubeup.TubeUp import TubeUp
-from tubeup import __version__
+from galup.utils import key_value_to_dict
+from galup.GalUp import GalUp
+from galup import __version__
 
 
 def main():
@@ -76,7 +81,7 @@ def main():
     debug_mode = args['--debug']
     use_download_archive = args['--use-download-archive']
     ignore_existing_item = args['--ignore-existing-item']
-    dir_path = args['--dir'] or '~/.tubeup'
+    dir_path = args['--dir'] or '~/.galup'
 
     if debug_mode:
         # Display log messages.
@@ -94,10 +99,10 @@ def main():
     metadata = key_value_to_dict(args['--metadata'])
 
     try:
-        tu = TubeUp(verbose=not quiet_mode,
-                    dir_path=dir_path,
-                    output_template=args['--output'])
-    except TubeUp.DirError as exc:
+        tu = GalUp(verbose=not quiet_mode,
+                   dir_path=dir_path,
+                   output_template=args['--output'])
+    except GalUp.DirError as exc:
         print('\n\033[91m'
               'Cannot use download directory: %s\n'
               '%s\n'
@@ -119,7 +124,7 @@ def main():
               'An exception just occured, if you found this '
               "exception isn't related with any of your connection problem, "
               'please report this issue to '
-              'https://github.com/bibanon/tubeup/issues')
+              'https://github.com/goodvids56/galup/issues')
         traceback.print_exc()
         print('\033[0m')  # End the red color text
         sys.exit(1)
