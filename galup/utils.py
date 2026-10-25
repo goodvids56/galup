@@ -31,9 +31,54 @@ def sanitize_identifier(identifier, replacement='-'):
 
 
 # gallery-dl metadata keys holding the ID of the post a file belongs to, in
-# order of preference. Extractors name it differently (e.g. Twitter uses
-# `tweet_id`, TikTok and Pixiv use `id`).
-POST_ID_KEYS = ('tweet_id', 'post_id', 'id')
+# order of preference. Extractors name it differently, so this list was
+# collected from the archive_fmt and filename_fmt of every gallery-dl
+# extractor. Nested keys are written as tuples, e.g. ('post', 'id') for
+# `{post[id]}`.
+POST_ID_KEYS = (
+    # Post IDs
+    'tweet_id',                 # twitter
+    'post_id',                  # instagram, bluesky, pixiv sketch, ...
+    'postId',                   # 8chan, fikfap
+    'postid',                   # nozomi
+    ('post', 'id'),             # boosty, blogger, bellazon, livedoor, koofr
+    ('status', 'id'),           # weibo
+    'submission_id',            # inkbunny, artstation challenges
+    'submitid',                 # weasyl
+    'journalid',                # weasyl journals
+    'work_id',                  # foriio, xfolio
+    'pin_id',                   # sexcom
+    'plurk_id',                 # plurk
+    'ugc_id',                   # steamcommunity
+    # Galleries, albums and chapters, where `id` usually is the ID of a
+    # single file in them
+    'gallery_id',               # nhentai, hitomi, imagefap, imagechest, ...
+    ('gallery', 'id'),          # flickr galleries, imageshack, xvideos
+    'gid',                      # exhentai, architizer
+    'album_id',                 # bunkr, cyberdrop, erome, catbox, ...
+    ('album', 'id'),            # imgur, flickr, artstation, luscious
+    'chapter_id',               # mangadex, hentai2read, mangareader, ...
+    'issue_id',                 # batcave
+    'set_id',                   # bakashots
+    'title_id',                 # naver-webtoon
+    # The generic ID used by most extractors (tiktok, pixiv, reddit,
+    # danbooru, kemono, tumblr, ...)
+    'id',
+    # IDs of single files, for extractors without any of the above
+    'index',                    # deviantart, hentaifoundry
+    'image_id',                 # dynastyscans, seiga
+    'video_id',                 # xasiat
+    'media_id',                 # ganknow
+    'message_id',               # discord
+    ('audioFile', 'id'),        # audiochan
+    'dataid',                   # nozomi
+    'encoded_id',               # goonbox
+    'document_id',              # harvardlawnuremberg
+    'listing_id',               # vanlifetrader
+    'model_id',                 # thefap
+    'uid',                      # naver-chzzk
+    'pid',                      # wikifeet
+)
 
 
 def get_post_id(file_meta):
@@ -42,7 +87,9 @@ def get_post_id(file_meta):
     metadata doesn't contain one.
     """
     for key in POST_ID_KEYS:
-        value = file_meta.get(key)
+        value = file_meta
+        for part in (key if isinstance(key, tuple) else (key,)):
+            value = value.get(part) if isinstance(value, dict) else None
         if isinstance(value, bool) or not isinstance(value, (str, int)):
             continue
         # Some extractors use 0 for "no post", e.g. Twitter avatars

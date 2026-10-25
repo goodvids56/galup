@@ -46,6 +46,17 @@ class UtilsTest(unittest.TestCase):
             get_itemname({'category': 'instagram', 'post_id': '31',
                           'media_id': '32'}, 'x'),
             'instagram-31')
+        self.assertEqual(
+            get_itemname({'category': 'boosty', 'id': 'file',
+                          'post': {'id': 'abc-123'}}, 'x'),
+            'boosty-abc-123')
+        self.assertEqual(
+            get_itemname({'category': 'bunkr', 'id': 'file',
+                          'album_id': 'Xy7'}, 'x'),
+            'bunkr-Xy7')
+        self.assertEqual(
+            get_itemname({'category': 'deviantart', 'index': 987}, 'x'),
+            'deviantart-987')
 
     def test_get_itemname_without_post_id(self):
         self.assertEqual(
