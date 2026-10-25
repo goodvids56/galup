@@ -3,10 +3,6 @@ import re
 from collections import defaultdict
 
 
-EMPTY_ANNOTATION_FILE = ('<?xml version="1.0" encoding="UTF-8" ?>'
-                         '<document><annotations></annotations></document>')
-
-
 def key_value_to_dict(lst):
     """
     Convert many key:value pair strings into a python dictionary
@@ -31,12 +27,17 @@ def sanitize_identifier(identifier, replacement='-'):
     return re.sub(r'[^\w-]', replacement, identifier)
 
 
-def get_itemname(infodict):
-    # Remove illegal characters in identifier
+def get_itemname(category, basename):
+    """
+    Build an archive.org identifier from a gallery-dl extractor category and
+    the basename of the downloaded file.
+    """
+    # Remove illegal characters in identifier; archive.org identifiers are
+    # limited to 100 characters
     return sanitize_identifier('%s-%s' % (
-        infodict.get('extractor'),
-        infodict.get('display_id', infodict.get('id')),
-    ))
+        category or 'gallery-dl',
+        os.path.basename(basename),
+    ))[:100]
 
 
 def check_is_file_empty(filepath):

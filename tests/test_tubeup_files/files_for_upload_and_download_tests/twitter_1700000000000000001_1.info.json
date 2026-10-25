@@ -1,0 +1,44 @@
+{
+    "tweet_id": 1700000000000000001,
+    "retweet_id": 0,
+    "quote_id": 0,
+    "reply_id": 0,
+    "conversation_id": 1700000000000000001,
+    "date": "2023-09-08 12:34:56",
+    "author": {
+        "id": 123456789,
+        "name": "example_artist",
+        "nick": "Example Artist",
+        "location": "",
+        "date": "2015-01-05 10:00:00",
+        "verified": false
+    },
+    "user": {
+        "id": 123456789,
+        "name": "example_artist",
+        "nick": "Example Artist"
+    },
+    "lang": "en",
+    "source": "Twitter Web App",
+    "sensitive": false,
+    "favorite_count": 42,
+    "quote_count": 0,
+    "reply_count": 3,
+    "retweet_count": 7,
+    "content": "Mountain sketch, finished today\nThanks for looking! #art #mountains",
+    "hashtags": [
+        "art",
+        "mountains"
+    ],
+    "count": 1,
+    "category": "twitter",
+    "subcategory": "tweet",
+    "num": 1,
+    "type": "photo",
+    "width": 1200,
+    "height": 800,
+    "filename": "F5aBcDeXYZ",
+    "extension": "jpg",
+    "file_url": "https://pbs.twimg.com/media/F5aBcDeXYZ?format=jpg&name=orig",
+    "webpage_url": "https://x.com/example_artist/status/1700000000000000001"
+}

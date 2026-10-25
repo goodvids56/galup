@@ -5,9 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tubeup"
 dynamic = ["version"]
-description = "VOD service to Archive.org uploader"
+description = "gallery-dl to Archive.org uploader (a fork of TubeUp)"
 authors = [
-    {name = "Bibliotheca Anonoma"}
+    {name = "Bibliotheca Anonoma"},
+    {name = "galup fork contributors"}
 ]
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,19 +17,17 @@ license-files = ["LICENSE"]
 dependencies = [
     "internetarchive",
     "docopt==0.6.2",
-    "yt-dlp[default,curl-cffi]",
+    "gallery-dl",
 ]
 keywords = [
     "archive.org",
     "archiving",
     "bibliotheca anonoma",
     "internet archive",
-    "vod",
+    "gallery-dl",
+    "gallery",
+    "image",
     "video",
-    "youtube",
-    "youtube-dl",
-    "youtube-dlc",
-    "yt-dlp",
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -43,14 +42,16 @@ classifiers = [
     "Programming Language :: Python :: Implementation",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Topic :: Multimedia :: Graphics",
     "Topic :: Multimedia :: Video",
     "Topic :: Utilities",
 ]
 
 [project.urls]
-homepage = "https://github.com/bibanon/tubeup"
-source = "https://github.com/bibanon/tubeup.git"
-issues = "https://github.com/bibanon/tubeup/issues"
+homepage = "https://github.com/goodvids56/galup"
+source = "https://github.com/goodvids56/galup.git"
+issues = "https://github.com/goodvids56/galup/issues"
+upstream = "https://github.com/bibanon/tubeup"
 
 [project.scripts]
 tubeup = "tubeup.__main__:main"

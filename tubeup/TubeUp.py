@@ -1,17 +1,18 @@
 import os
-import sys
 import re
 import glob
 import time
 import json
 import logging
+import collections
 import internetarchive
 
 from internetarchive.config import parse_config_file
 from datetime import datetime
-from yt_dlp import YoutubeDL
-from .utils import (get_itemname, check_is_file_empty,
-                    EMPTY_ANNOTATION_FILE)
+from gallery_dl import config as gdl_config
+from gallery_dl import exception as gdl_exception
+from gallery_dl.job import DownloadJob
+from .utils import get_itemname
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -19,6 +20,58 @@ from tubeup import __version__
 
 
 DOWNLOAD_DIR_NAME = 'downloads'
+
+VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
+                    'ts', 'mpg', 'mpeg', '3gp'}
+AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
+
+
+class GalleryJob(DownloadJob):
+    """
+    gallery-dl DownloadJob that reports every file it downloads (or finds
+    already on disk) and can skip files whose archive.org item already exists.
+
+    Child jobs (e.g. the posts of a user profile) are created by gallery-dl
+    with `self.__class__(extractor, parent)`, so the callbacks are inherited
+    from the parent job.
+    """
+
+    def __init__(self, url, parent=None, on_file=None, should_skip=None):
+        DownloadJob.__init__(self, url, parent)
+        if parent is not None:
+            on_file = parent.on_file
+            should_skip = parent.should_skip
+        self.on_file = on_file
+        self.should_skip = should_skip
+
+    def initialize(self, kwdict=None):
+        DownloadJob.initialize(self, kwdict)
+        if self.on_file is None:
+            return
+        if not self.hooks:
+            self.hooks = collections.defaultdict(list)
+        self.register_hooks({'after': self._report_file,
+                             'skip': self._report_file})
+
+    def handle_url(self, url, kwdict):
+        if self.should_skip is not None:
+            if self.pathfmt is None:
+                self.initialize(kwdict)
+            self.pathfmt.set_filename(kwdict)
+            basename = self.pathfmt.build_filename(kwdict)
+            if self.pathfmt.extension:
+                basename = basename[:-len(self.pathfmt.extension)]
+            basename = basename.rstrip('.')
+            if self.should_skip(kwdict, basename):
+                if self.archive is not None:
+                    self.archive.add(kwdict)
+                return
+        DownloadJob.handle_url(self, url, kwdict)
+
+    def _report_file(self, pathfmt):
+        filepath = pathfmt.realpath
+        if filepath and os.path.isfile(filepath):
+            self.on_file(filepath, pathfmt.kwdict, self.extractor.url)
 
 
 class TubeUp(object):
@@ -31,8 +84,9 @@ class TubeUp(object):
                  ia_config_path=None,
                  output_template=None):
         """
-        `tubeup` is a tool to archive YouTube by downloading the videos and
-        uploading it back to the archive.org.
+        `tubeup` (gallery-dl fork) is a tool to archive images, galleries and
+        other media by downloading them with gallery-dl and uploading them to
+        archive.org.
 
         :param verbose:         A boolean, True means all loggings will be
                                 printed out to stdout.
@@ -41,17 +95,15 @@ class TubeUp(object):
                                '~/.tubeup'.
         :param ia_config_path:  Path to an internetarchive config file, will
                                 be used in uploading the file.
-        :param output_template: A template string that will be used to
-                                generate the output filenames.
+        :param output_template: A gallery-dl filename format string that will
+                                be used to generate the output filenames.
+                                Defaults to each extractor's own format.
         """
         self.dir_path = dir_path
         self.verbose = verbose
         self.ia_config_path = ia_config_path
         self.logger = getLogger(__name__)
-        if output_template is None:
-            self.output_template = '%(id)s.%(ext)s'
-        else:
-            self.output_template = output_template
+        self.output_template = output_template
 
         # Just print errors in quiet mode
         if not self.verbose:
@@ -114,264 +166,186 @@ class TubeUp(object):
 
     def get_resource_basenames(self, urls,
                                cookie_file=None, proxy_url=None,
-                               ydl_username=None, ydl_password=None,
+                               gdl_username=None, gdl_password=None,
                                use_download_archive=False,
                                ignore_existing_item=False):
         """
-        Get resource basenames from an url.
+        Download urls with gallery-dl and get the basenames of the files.
 
         :param urls:                  A list of urls that will be downloaded with
-                                      youtubedl.
-        :param cookie_file:           A cookie file for YoutubeDL.
-        :param proxy_url:             A proxy url for YoutubeDL.
-        :param ydl_username:          Username that will be used to download the
-                                      resources with youtube_dl.
-        :param ydl_password:          Password of the related username, will be used
-                                      to download the resources with youtube_dl.
-        :param use_download_archive:  Record the video url to the download archive.
-                                      This will download only videos not listed in
-                                      the archive file. Record the IDs of all
-                                      downloaded videos in it.
+                                      gallery-dl.
+        :param cookie_file:           A cookie file for gallery-dl.
+        :param proxy_url:             A proxy url for gallery-dl.
+        :param gdl_username:          Username that will be used to download the
+                                      resources with gallery-dl.
+        :param gdl_password:          Password of the related username, will be used
+                                      to download the resources with gallery-dl.
+        :param use_download_archive:  Record downloaded files in the download archive.
+                                      This will download only files not listed in
+                                      the archive file.
         :param ignore_existing_item:  Ignores the check for existing items on archive.org.
-        :return:                      Set of videos basename that has been downloaded.
+        :return:                      Set of file basenames that have been downloaded.
         """
         downloaded_files_basename = set()
 
-        def check_if_ia_item_exists(infodict):
-            itemname = get_itemname(infodict)
+        def on_file(filepath, kwdict, page_url):
+            basename = os.path.splitext(filepath)[0]
+            self.write_info_json(basename, kwdict, page_url)
+            downloaded_files_basename.add(basename)
+
+        def check_if_ia_item_exists(kwdict, basename):
+            itemname = get_itemname(kwdict.get('category'), basename)
             item = internetarchive.get_item(itemname)
-            if item.exists and self.verbose:
-                print("\n:: Item already exists. Not downloading.")
-                print('Title: %s' % infodict['title'])
-                print('Video URL: %s\n' % infodict['webpage_url'])
+            if item.exists:
+                if self.verbose:
+                    print("\n:: Item already exists. Not downloading.")
+                    print('Item: %s\n' % itemname)
                 return True
             return False
 
-        def ydl_progress_each(entry):
-            if not entry:
-                self.logger.warning('Video "%s" is not available. Skipping.' % url)
-                return
-            if ydl.in_download_archive(entry):
-                return
-            if not check_if_ia_item_exists(entry):
-                ydl.extract_info(entry['webpage_url'])
-                downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, entry))
-            else:
-                ydl.record_download_archive(entry)
+        should_skip = None if ignore_existing_item else check_if_ia_item_exists
 
-        def ydl_progress_hook(d):
-            if d['status'] == 'downloading' and self.verbose:
-                if d.get('_total_bytes_str') is not None:
-                    msg_template = ('%(_percent_str)s of %(_total_bytes_str)s '
-                                    'at %(_speed_str)s ETA %(_eta_str)s')
-                elif d.get('_total_bytes_estimate_str') is not None:
-                    msg_template = ('%(_percent_str)s of '
-                                    '~%(_total_bytes_estimate_str)s at '
-                                    '%(_speed_str)s ETA %(_eta_str)s')
-                elif d.get('_downloaded_bytes_str') is not None:
-                    if d.get('_elapsed_str'):
-                        msg_template = ('%(_downloaded_bytes_str)s at '
-                                        '%(_speed_str)s (%(_elapsed_str)s)')
-                    else:
-                        msg_template = ('%(_downloaded_bytes_str)s '
-                                        'at %(_speed_str)s')
-                else:
-                    msg_template = ('%(_percent_str)s % at '
-                                    '%(_speed_str)s ETA %(_eta_str)s')
-
-                process_msg = '\r[download] ' + (msg_template % d) + '\033[K'
-                sys.stdout.write(process_msg)
-                sys.stdout.flush()
-
-            if d['status'] == 'finished':
-                msg = '\nDownloaded %s' % d['filename']
-
-                self.logger.debug(d)
-                self.logger.info(msg)
-                if self.verbose:
-                    print(msg)
-
-            if d['status'] == 'error':
-                # TODO: Complete the error message
-                msg = 'Error when downloading the video'
-
-                self.logger.error(msg)
-                if self.verbose:
-                    print(msg)
-
-        ydl_opts = self.generate_ydl_options(ydl_progress_hook,
-                                             cookie_file, proxy_url,
-                                             ydl_username, ydl_password,
+        gdl_opts = self.generate_gdl_options(cookie_file, proxy_url,
+                                             gdl_username, gdl_password,
                                              use_download_archive)
+        self.apply_gdl_options(gdl_opts)
 
-        with YoutubeDL(ydl_opts) as ydl:
-            for url in urls:
-                if not ignore_existing_item:
-                    # Get the info dict of the url
-                    info_dict = ydl.extract_info(url, download=False)
-
-                    if info_dict.get('_type', 'video') == 'playlist':
-                        for entry in info_dict['entries']:
-                            ydl_progress_each(entry)
-                    else:
-                        ydl_progress_each(info_dict)
-                else:
-                    info_dict = ydl.extract_info(url)
-                    downloaded_files_basename.update(self.create_basenames_from_ydl_info_dict(ydl, info_dict))
+        for url in urls:
+            try:
+                job = GalleryJob(url, on_file=on_file,
+                                 should_skip=should_skip)
+            except gdl_exception.NoExtractorError:
+                self.logger.warning('URL "%s" is not supported by gallery-dl. '
+                                    'Skipping.' % url)
+                continue
+            job.run()
 
         self.logger.debug(
-            'Basenames obtained from url (%s): %s'
-            % (url, downloaded_files_basename))
+            'Basenames obtained from urls (%s): %s'
+            % (urls, downloaded_files_basename))
 
         return downloaded_files_basename
 
-    def create_basenames_from_ydl_info_dict(self, ydl, info_dict):
+    @staticmethod
+    def write_info_json(basename, kwdict, page_url):
         """
-        Create basenames from YoutubeDL info_dict.
+        Write the gallery-dl metadata of a file to `<basename>.info.json`.
 
-        :param ydl:        A `youtube_dl.YoutubeDL` instance.
-        :param info_dict:  A ydl info_dict that will be used to create
-                           the basenames.
-        :return:           A set that contains basenames that created from
-                           the `info_dict`.
+        :param basename:  Path of the downloaded file without its extension.
+        :param kwdict:    gallery-dl metadata dictionary of the file.
+        :param page_url:  URL of the page the file was extracted from.
+        :return:          Path of the written json file.
         """
-        info_type = info_dict.get('_type', 'video')
-        self.logger.debug('Creating basenames from ydl info dict with type %s'
-                          % info_type)
+        meta = {key: value for key, value in kwdict.items()
+                if not key.startswith('_')}
+        meta['webpage_url'] = page_url
+        json_path = basename + '.info.json'
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(meta, f, ensure_ascii=False, indent=4, default=str)
+        return json_path
 
-        filenames = set()
-
-        if info_type == 'playlist':
-            # Iterate and get the filenames through the playlist
-            for video in info_dict['entries']:
-                filenames.add(ydl.prepare_filename(video))
-        else:
-            filenames.add(ydl.prepare_filename(info_dict))
-
-        basenames = set()
-
-        for filename in filenames:
-            filename_without_ext = os.path.splitext(filename)[0]
-            file_basename = re.sub(r'(\.f\d+)', '', filename_without_ext)
-            basenames.add(file_basename)
-
-        return basenames
-
-    def generate_ydl_options(self,
-                             ydl_progress_hook,
+    def generate_gdl_options(self,
                              cookie_file=None,
                              proxy_url=None,
-                             ydl_username=None,
-                             ydl_password=None,
-                             use_download_archive=False,
-                             ydl_output_template=None):
+                             gdl_username=None,
+                             gdl_password=None,
+                             use_download_archive=False):
         """
         Generate a dictionary that contains options that will be used
-        by yt-dlp.
+        by gallery-dl, keyed by their gallery-dl config section.
 
-        :param ydl_progress_hook:     A function that will be called during the
-                                      download process by youtube_dl.
-        :param proxy_url:             A proxy url for YoutubeDL.
-        :param ydl_username:          Username that will be used to download the
-                                      resources with youtube_dl.
-        :param ydl_password:          Password of the related username, will be
+        :param cookie_file:           A cookie file for gallery-dl.
+        :param proxy_url:             A proxy url for gallery-dl.
+        :param gdl_username:          Username that will be used to download the
+                                      resources with gallery-dl.
+        :param gdl_password:          Password of the related username, will be
                                       used to download the resources with
-                                      youtube_dl.
-        :param use_download_archive:  Record the video url to the download archive.
-                                      This will download only videos not listed in
-                                      the archive file. Record the IDs of all
-                                      downloaded videos in it.
+                                      gallery-dl.
+        :param use_download_archive:  Record downloaded files in the download archive.
+                                      This will download only files not listed in
+                                      the archive file.
         :return:                      A dictionary that contains options that will
-                                      be used by youtube_dl.
+                                      be used by gallery-dl.
         """
-        ydl_opts = {
-            'outtmpl': os.path.join(self.dir_path['downloads'],
-                                    self.output_template),
-            'restrictfilenames': True,
-            'quiet': not self.verbose,
-            'verbose': self.verbose,
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': self.logger,
-            'progress_hooks': [ydl_progress_hook]
+        extractor_opts = {
+            'base-directory': self.dir_path['downloads'],
+            'skip': True,
+            'url-metadata': 'file_url',
         }
 
+        if self.output_template is not None:
+            extractor_opts['filename'] = self.output_template
+
         if cookie_file is not None:
-            ydl_opts['cookiefile'] = cookie_file
+            extractor_opts['cookies'] = cookie_file
 
         if proxy_url is not None:
-            ydl_opts['proxy'] = proxy_url
+            extractor_opts['proxy'] = proxy_url
 
-        if ydl_username is not None:
-            ydl_opts['username'] = ydl_username
+        if gdl_username is not None:
+            extractor_opts['username'] = gdl_username
 
-        if ydl_password is not None:
-            ydl_opts['password'] = ydl_password
+        if gdl_password is not None:
+            extractor_opts['password'] = gdl_password
 
         if use_download_archive:
-            ydl_opts['download_archive'] = os.path.join(self.dir_path['root'],
-                                                        '.ytdlarchive')
+            extractor_opts['archive'] = os.path.join(self.dir_path['root'],
+                                                     '.gallerydlarchive')
 
-        return ydl_opts
+        return {
+            'extractor': extractor_opts,
+            'downloader': {
+                'part': True,
+                'retries': 9001,
+            },
+            'output': {
+                'mode': 'auto' if self.verbose else 'null',
+                'skip': self.verbose,
+            },
+        }
 
-    def upload_ia(self, videobasename, custom_meta=None):
+    @staticmethod
+    def apply_gdl_options(gdl_opts):
         """
-        Upload video to archive.org.
+        Load the user's gallery-dl configuration files, then apply the options
+        generated by `generate_gdl_options` on top of them.
 
-        :param videobasename:  A video base name.
-        :param custom_meta:    A custom meta, will be used by internetarchive
-                               library when uploading to archive.org.
-        :return:               A tuple containing item name and metadata used
-                               when uploading to archive.org and whether the item
-                               already exists.
+        :param gdl_opts:  A dictionary returned by `generate_gdl_options`.
         """
-        json_metadata_filepath = videobasename + '.info.json'
+        gdl_config.clear()
+        gdl_config.load()
+        for section, options in gdl_opts.items():
+            for key, value in options.items():
+                gdl_config.set((section,), key, value)
+
+    def upload_ia(self, basename, custom_meta=None):
+        """
+        Upload a downloaded file to archive.org.
+
+        :param basename:     Path of the downloaded file without its extension.
+        :param custom_meta:  A custom meta, will be used by internetarchive
+                             library when uploading to archive.org.
+        :return:             A tuple containing item name and metadata used
+                             when uploading to archive.org.
+        """
+        json_metadata_filepath = basename + '.info.json'
         with open(json_metadata_filepath, 'r', encoding='utf-8') as f:
-            vid_meta = json.load(f)
+            file_meta = json.load(f)
 
-        # Exit if video download did not complete, don't upload .part files to IA
-        for ext in ['*.part.*', '*.f303.*', '*.f302.*', '*.ytdl.*', '*.f251.*', '*.248.*',
-                    '*.f247.*', '*.temp.*', '*.temp', '*.part', '*.ytdl']:
-            if glob.glob(videobasename + ext):
-                msg = 'Video download incomplete, please re-run or delete video stubs in downloads folder, exiting...'
-                raise Exception(msg)
+        # Exit if download did not complete, don't upload .part files to IA
+        pattern = glob.escape(basename)
+        if glob.glob(pattern + '.*.part') or glob.glob(pattern + '.part'):
+            msg = ('Download incomplete, please re-run or delete the .part '
+                   'files in downloads folder, exiting...')
+            raise Exception(msg)
 
-        itemname = get_itemname(vid_meta)
-        metadata = self.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta)
+        itemname = get_itemname(file_meta.get('category'), basename)
+        metadata = self.create_archive_org_metadata_from_gallerydl_meta(
+            file_meta, os.path.basename(basename))
 
-        # Delete empty description file
-        description_file_path = videobasename + '.description'
-        if (os.path.exists(description_file_path) and
-            (('description' in vid_meta and
-             vid_meta['description'] == '') or
-                check_is_file_empty(description_file_path))):
-            os.remove(description_file_path)
-
-        # Delete empty annotations.xml file so it isn't uploaded
-        annotations_file_path = videobasename + '.annotations.xml'
-        if (os.path.exists(annotations_file_path) and
-            (('annotations' in vid_meta and
-             vid_meta['annotations'] in {'', EMPTY_ANNOTATION_FILE}) or
-                check_is_file_empty(annotations_file_path))):
-            os.remove(annotations_file_path)
-
-        # Upload all files with videobase name: e.g. video.mp4,
-        # video.info.json, video.srt, etc.
-        files_to_upload = glob.glob(videobasename + '*')
+        # Upload all files with this basename: e.g. image.jpg and
+        # image.info.json
+        files_to_upload = glob.glob(pattern + '.*')
 
         # Upload the item to the Internet Archive
         item = internetarchive.get_item(itemname)
@@ -402,57 +376,61 @@ class TubeUp(object):
 
     def archive_urls(self, urls, custom_meta=None,
                      cookie_file=None, proxy=None,
-                     ydl_username=None, ydl_password=None,
+                     gdl_username=None, gdl_password=None,
                      use_download_archive=False,
                      ignore_existing_item=False):
         """
-        Download and upload videos from youtube_dl supported sites to
+        Download and upload files from gallery-dl supported sites to
         archive.org
 
         :param urls:                  List of url that will be downloaded and uploaded
                                       to archive.org
         :param custom_meta:           A custom metadata that will be used when
                                       uploading the file with archive.org.
-        :param cookie_file:           A cookie file for YoutubeDL.
-        :param proxy_url:             A proxy url for YoutubeDL.
-        :param ydl_username:          Username that will be used to download the
-                                      resources with youtube_dl.
-        :param ydl_password:          Password of the related username, will be used
-                                      to download the resources with youtube_dl.
-        :param use_download_archive:  Record the video url to the download archive.
-                                      This will download only videos not listed in
-                                      the archive file. Record the IDs of all
-                                      downloaded videos in it.
+        :param cookie_file:           A cookie file for gallery-dl.
+        :param proxy:                 A proxy url for gallery-dl.
+        :param gdl_username:          Username that will be used to download the
+                                      resources with gallery-dl.
+        :param gdl_password:          Password of the related username, will be used
+                                      to download the resources with gallery-dl.
+        :param use_download_archive:  Record downloaded files in the download archive.
+                                      This will download only files not listed in
+                                      the archive file.
         :param ignore_existing_item:  Ignores the check for existing items on archive.org.
         :return:                      Tuple containing identifier and metadata of the
                                       file that has been uploaded to archive.org.
         """
         downloaded_file_basenames = self.get_resource_basenames(
-            urls, cookie_file, proxy, ydl_username, ydl_password, use_download_archive,
-            ignore_existing_item)
-        for basename in downloaded_file_basenames:
+            urls, cookie_file, proxy, gdl_username, gdl_password,
+            use_download_archive, ignore_existing_item)
+        for basename in sorted(downloaded_file_basenames):
             identifier, meta = self.upload_ia(basename, custom_meta)
             yield identifier, meta
 
     @staticmethod
-    def determine_collection_type(url):
+    def determine_media_type(file_meta, url):
         """
-        Determine collection type for an url.
+        Determine the archive.org mediatype and collection of a file.
 
-        :param url:  URL that the collection type will be determined.
-        :return:     String, name of a collection.
+        :param file_meta:  gallery-dl metadata of the file.
+        :param url:        URL the file was downloaded from.
+        :return:           Tuple of (mediatype, collection).
         """
-        if urlparse(url).netloc == 'soundcloud.com':
-            return 'opensource_audio'
-        return 'opensource_movies'
+        extension = str(file_meta.get('extension') or '').lower()
+        if (extension in AUDIO_EXTENSIONS or
+                urlparse(url).netloc == 'soundcloud.com'):
+            return 'audio', 'opensource_audio'
+        if extension in VIDEO_EXTENSIONS:
+            return 'movies', 'opensource_movies'
+        return 'image', 'opensource_image'
 
     @staticmethod
-    def determine_licenseurl(vid_meta):
+    def determine_licenseurl(file_meta):
         """
-        Determine licenseurl for an url
+        Determine licenseurl for a file
 
-        :param vid_meta:
-        :return:
+        :param file_meta:  gallery-dl metadata of the file.
+        :return:           License url, or an empty string if unknown.
         """
         licenseurl = ''
         licenses = {
@@ -465,70 +443,83 @@ class TubeUp(object):
             "Attribution-NoDerivs": "https://creativecommons.org/licenses/by-nd/2.0/"
         }
 
-        if 'license' in vid_meta and vid_meta['license']:
-            licenseurl = licenses.get(vid_meta['license'])
+        license_name = file_meta.get('license')
+        if isinstance(license_name, str) and license_name:
+            licenseurl = licenses.get(license_name, '')
 
         return licenseurl
 
     @staticmethod
-    def create_archive_org_metadata_from_youtubedl_meta(vid_meta):
+    def _first_text(file_meta, keys):
         """
-        Create an archive.org from youtubedl-generated metadata.
-
-        :param vid_meta: A dict containing youtubedl-generated metadata.
-        :return:         A dict containing metadata to be used by
-                         internetarchive library.
+        Return the first non-empty string value found under one of `keys`.
+        Dict values (e.g. gallery-dl's `user` or `author`) are searched for a
+        name-like field.
         """
-        title = '%s' % (vid_meta['title'])
-        videourl = vid_meta['webpage_url']
+        for key in keys:
+            value = file_meta.get(key)
+            if isinstance(value, dict):
+                value = (value.get('name') or value.get('username') or
+                         value.get('nick'))
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return None
 
-        collection = TubeUp.determine_collection_type(videourl)
+    @staticmethod
+    def _tags_list(value):
+        if isinstance(value, str):
+            return value.split()
+        if isinstance(value, list):
+            tags = []
+            for tag in value:
+                if isinstance(tag, dict):
+                    tag = tag.get('name')
+                if isinstance(tag, str) and tag:
+                    tags.append(tag)
+            return tags
+        return []
 
-        # Some video services don't tell you the uploader,
+    @staticmethod
+    def create_archive_org_metadata_from_gallerydl_meta(file_meta, basename):
+        """
+        Create an archive.org metadata from gallery-dl-generated metadata.
+
+        :param file_meta:  A dict containing gallery-dl-generated metadata.
+        :param basename:   Filename of the downloaded file without its
+                           extension, used as a fallback title.
+        :return:           A dict containing metadata to be used by
+                           internetarchive library.
+        """
+        category = file_meta.get('category') or 'gallery-dl'
+        pageurl = file_meta.get('webpage_url') or file_meta.get('file_url') or ''
+
+        mediatype, collection = TubeUp.determine_media_type(file_meta, pageurl)
+
+        title = TubeUp._first_text(file_meta, ('title', 'post_title')) or \
+            '%s %s' % (category, basename)
+
+        # Some services don't tell you the uploader,
         # use our program's name in that case.
-        try:
-            if vid_meta['extractor_key'] == 'TwitchClips' and 'creator' in vid_meta and vid_meta['creator']:
-                uploader = vid_meta['creator']
-            elif 'uploader' in vid_meta and vid_meta['uploader']:
-                uploader = vid_meta['uploader']
-            elif 'uploader_url' in vid_meta and vid_meta['uploader_url']:
-                uploader = vid_meta['uploader_url']
-            else:
-                uploader = 'tubeup.py'
-        except TypeError:  # apparently uploader is null as well
-            uploader = 'tubeup.py'
+        uploader = TubeUp._first_text(
+            file_meta, ('uploader', 'artist', 'author', 'user', 'username',
+                        'creator', 'owner')) or 'tubeup.py'
 
-        try:  # some videos don't give an upload date
-            d = datetime.strptime(vid_meta['upload_date'], '%Y%m%d')
-            upload_date = d.isoformat().split('T')[0]
-            upload_year = upload_date[:4]  # 20150614 -> 2015
-        except (KeyError, TypeError):
+        try:  # some files don't give an upload date
+            d = datetime.fromisoformat(str(file_meta['date']))
+            upload_date = d.date().isoformat()
+            upload_year = upload_date[:4]
+        except (KeyError, TypeError, ValueError):
             # Use current date and time as default values
             upload_date = time.strftime("%Y-%m-%d")
             upload_year = time.strftime("%Y")
 
         # load up tags into an IA compatible semicolon-separated string
-        # example: Youtube;video;
-        tags_string = '%s;video;' % vid_meta['extractor_key']
+        # example: twitter;image;
+        tags_string = '%s;%s;' % (category, mediatype)
 
-        if 'categories' in vid_meta:
-            # add categories as tags as well, if they exist
-            try:
-                for category in vid_meta['categories']:
-                    tags_string += '%s;' % category
-            except Exception:
-                print("No categories found.")
-
-        if 'tags' in vid_meta:  # some video services don't have tags
-            try:
-                if 'tags' in vid_meta is None:
-                    tags_string += '%s;' % vid_meta['id']
-                    tags_string += '%s;' % 'video'
-                else:
-                    for tag in vid_meta['tags']:
-                        tags_string += '%s;' % tag
-            except Exception:
-                print("Unable to process tags successfully.")
+        for key in ('tags', 'hashtags', 'categories'):
+            for tag in TubeUp._tags_list(file_meta.get(key)):
+                tags_string += '%s;' % tag
 
         # IA's subject field has a 255 bytes length limit, so we need to truncate tags_string
         while len(tags_string.encode('utf-8')) > 255:
@@ -537,18 +528,15 @@ class TubeUp(object):
             tags_string = ';'.join(tags_list)
 
         # license
-        licenseurl = TubeUp.determine_licenseurl(vid_meta)
+        licenseurl = TubeUp.determine_licenseurl(file_meta)
 
-        # if there is no description don't upload the empty .description file
-        description_text = vid_meta.get('description', '')
-        if description_text is None:
-            description_text = ''
+        description_text = TubeUp._first_text(
+            file_meta, ('description', 'content', 'caption', 'text')) or ''
         # archive.org does not display raw newlines
         description = re.sub('\r?\n', '<br>', description_text)
 
         metadata = dict(
-            mediatype=('audio' if collection == 'opensource_audio'
-                       else 'movies'),
+            mediatype=mediatype,
             creator=uploader,
             collection=collection,
             title=title,
@@ -556,17 +544,15 @@ class TubeUp(object):
             date=upload_date,
             year=upload_year,
             subject=tags_string,
-            originalurl=videourl,
+            originalurl=pageurl,
             licenseurl=licenseurl,
 
             # Set 'scanner' metadata pair to allow tracking of TubeUp
-            # powered uploads, per request from archive.org
-            scanner='TubeUp Video Stream Mirroring Application {}'.format(__version__))
+            # powered uploads, per request from archive.org. This fork
+            # identifies itself separately from upstream TubeUp.
+            scanner='TubeUp (gallery-dl fork) {}'.format(__version__))
 
-        # add channel url if it exists
-        if 'uploader_url' in vid_meta:
-            metadata["channel"] = vid_meta["uploader_url"]
-        elif 'channel_url' in vid_meta:
-            metadata["channel"] = vid_meta["channel_url"]
+        if file_meta.get('file_url'):
+            metadata['source'] = file_meta['file_url']
 
         return metadata

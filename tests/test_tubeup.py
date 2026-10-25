@@ -7,28 +7,53 @@ import requests_mock
 import glob
 import logging
 
-from tubeup.TubeUp import TubeUp, DOWNLOAD_DIR_NAME
+from datetime import datetime
+
+from tubeup.TubeUp import TubeUp, GalleryJob, DOWNLOAD_DIR_NAME
 from tubeup import __version__
-from yt_dlp import YoutubeDL
-from .constants import info_dict_playlist, info_dict_video
 from unittest.mock import patch
 
 
 current_path = os.path.dirname(os.path.realpath(__file__))
 
-SCANNER = 'TubeUp Video Stream Mirroring Application {}'.format(__version__)
+SCANNER = 'TubeUp (gallery-dl fork) {}'.format(__version__)
+
+TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
+TWEET_BASENAME = 'twitter_1700000000000000001_1'
+TWEET_ITEMNAME = 'twitter-twitter_1700000000000000001_1'
+
+TWEET_METADATA = {
+    'mediatype': 'image',
+    'creator': 'example_artist',
+    'collection': 'opensource_image',
+    'title': 'twitter %s' % TWEET_BASENAME,
+    'description': ('Mountain sketch, finished today<br>'
+                    'Thanks for looking! #art #mountains'),
+    'date': '2023-09-08',
+    'year': '2023',
+    'subject': 'twitter;image;art;mountains;',
+    'originalurl': TWEET_URL,
+    'licenseurl': '',
+    'source': 'https://pbs.twimg.com/media/F5aBcDeXYZ?format=jpg&name=orig',
+    'scanner': SCANNER}
 
 
 def get_testfile_path(name):
     return os.path.join(current_path, 'test_tubeup_files', name)
 
 
-def mocked_ydl_progress_hook(d):
-    pass
+def load_tweet_meta():
+    with open(get_testfile_path('%s.info.json' % TWEET_BASENAME)) as f:
+        return json.load(f)
 
 
-def mock_upload_response_by_videobasename(m, ia_id, videobasename):
-    files_to_upload = glob.glob(videobasename + '*')
+def downloads_path(*names):
+    return os.path.join(current_path, 'test_tubeup_rootdir', 'downloads',
+                        *names)
+
+
+def mock_upload_response_by_basename(m, ia_id, basename):
+    files_to_upload = glob.glob(glob.escape(basename) + '.*')
 
     for file_path in files_to_upload:
         filename = os.path.basename(file_path)
@@ -45,34 +70,41 @@ def copy_testfiles_to_tubeup_rootdir_test():
                                  'files_for_upload_and_download_tests')
 
     for filepath in os.listdir(testfiles_dir):
-        shutil.copy(
-            os.path.join(testfiles_dir, filepath),
-            os.path.join(current_path, 'test_tubeup_rootdir', 'downloads',
-                         filepath))
+        shutil.copy(os.path.join(testfiles_dir, filepath),
+                    downloads_path(filepath))
 
 
-# Hijacked yt-dlp class so we don't make any real download requests.
-class MockYTDLP(YoutubeDL):
-    def extract_info(self, url, download=True):
-        filenames = {
-            "https://www.youtube.com/watch?v=KdsN9YhkDrY": "KdsN9YhkDrY.info.json",
-        }
+class FakePathFormat(object):
+    def __init__(self, realpath, kwdict):
+        self.realpath = realpath
+        self.kwdict = kwdict
 
-        print("MockYTDLP: Mocked yt-dlp info extraction of URL %s" % (url))
+
+# Hijacked GalleryJob class so we don't make any real download requests.
+# Instead of downloading, it reports the test file that is already in the
+# downloads directory, the same way the real job reports finished downloads.
+class MockGalleryJob(object):
+    def __init__(self, url, parent=None, on_file=None, should_skip=None):
+        print("MockGalleryJob: Mocked gallery-dl extraction of URL %s" % url)
 
         # make sure the url is one we expect to get. If the tests URL ever
         # change for some reason, this will fail, and we can add new cases
         # if needed.
-        if url not in filenames:
+        if url != TWEET_URL:
             raise ValueError("unexpected URL")
 
-        jsonpath = os.path.join(current_path, 'test_tubeup_rootdir',
-                                'downloads', filenames[url])
-        with open(jsonpath, "r") as f:
-            return json.load(f)
+        self.url = url
+        self.on_file = on_file
+
+    def run(self):
+        kwdict = load_tweet_meta()
+        del kwdict['webpage_url']
+        self.on_file(downloads_path(TWEET_BASENAME + '.jpg'), kwdict,
+                     self.url)
+        return 0
 
 
-@patch("tubeup.TubeUp.YoutubeDL", MockYTDLP)
+@patch("tubeup.TubeUp.GalleryJob", MockGalleryJob)
 class TubeUpTests(unittest.TestCase):
 
     def setUp(self):
@@ -105,361 +137,176 @@ class TubeUpTests(unittest.TestCase):
         tu = TubeUp(verbose=True)
         self.assertIsInstance(tu.logger, logging.Logger)
 
-    def test_determine_collection_type(self):
-        soundcloud_colltype = self.tu.determine_collection_type(
-            'https://soundcloud.com/testurl')
-        another_colltype = self.tu.determine_collection_type(
-            'https://www.youtube.com/watch?v=testVideo'
-        )
+    def test_determine_media_type(self):
+        self.assertEqual(
+            self.tu.determine_media_type({'extension': 'jpg'},
+                                         'https://example.com/post/1'),
+            ('image', 'opensource_image'))
+        self.assertEqual(
+            self.tu.determine_media_type({'extension': 'MP4'},
+                                         'https://example.com/post/1'),
+            ('movies', 'opensource_movies'))
+        self.assertEqual(
+            self.tu.determine_media_type({'extension': 'flac'},
+                                         'https://example.com/post/1'),
+            ('audio', 'opensource_audio'))
+        self.assertEqual(
+            self.tu.determine_media_type({}, 'https://soundcloud.com/testurl'),
+            ('audio', 'opensource_audio'))
 
-        self.assertEqual(soundcloud_colltype, 'opensource_audio')
-        self.assertEqual(another_colltype, 'opensource_movies')
+    def test_gallery_job_is_a_gallery_dl_download_job(self):
+        # The class patch above only replaces the name used by TubeUp.py
+        from gallery_dl.job import DownloadJob
+        self.assertTrue(issubclass(GalleryJob, DownloadJob))
 
-    def test_create_basenames_from_ydl_info_dict_video(self):
-        ydl = YoutubeDL()
-        result = self.tu.create_basenames_from_ydl_info_dict(
-            ydl, info_dict_video)
-
-        expected_result = set(
-            ['Video and Blog Competition 2017 - Bank Indonesia & '
-             'NET TV #BIGoesToCampus [hlG3LeFaQwU]'])
-
-        self.assertEqual(result, expected_result)
-
-    def test_create_basenames_from_ydl_info_dict_playlist(self):
-        ydl = YoutubeDL()
-        result = self.tu.create_basenames_from_ydl_info_dict(
-            ydl, info_dict_playlist)
-
-        expected_result = set([
-            'Live Streaming Rafid Aslam [7gjgkH5iPaE]',
-            'Live Streaming Rafid Aslam [q92kxPm-pqM]',
-            'Cara Membuat Laptop Menjadi Hotspot WiFi Dengan CMD [YjFwMSDNphM]',
-            '[CSO] Defeat Boss in Dead End With Thanatos 7 [EEm6MwXLse0]',
-            'Cara Bermain Minecraft Multiplayer Dengan LAN [g2vTZ2ka-tM]',
-            'Live Streaming Rafid Aslam [AXhuSS5_9YU]',
-            'Cara Membuat Disk Baru di Komputer [KDOygJnK7Sw]',
-            'Cara Mendownload Lewat Torrent [cC-9RghkvXs]']
-        )
-
-        self.assertEqual(result, expected_result)
-
-    def test_generate_ydl_options_with_download_archive(self):
-        result = self.tu.generate_ydl_options(mocked_ydl_progress_hook,
-                                              use_download_archive=True)
+    def test_generate_gdl_options(self):
+        result = self.tu.generate_gdl_options()
 
         expected_result = {
-            'outtmpl': os.path.join(
-                self.tu.dir_path['downloads'], '%(id)s.%(ext)s'),
-            'restrictfilenames': True,
-            'verbose': False,
-            'quiet': True,
-            'download_archive': os.path.join(self.tu.dir_path['root'],
-                                             '.ytdlarchive'),
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': self.tu.logger,
-            'progress_hooks': [mocked_ydl_progress_hook]}
+            'extractor': {
+                'base-directory': self.tu.dir_path['downloads'],
+                'skip': True,
+                'url-metadata': 'file_url'},
+            'downloader': {
+                'part': True,
+                'retries': 9001},
+            'output': {
+                'mode': 'null',
+                'skip': False}}
 
         self.assertEqual(result, expected_result)
 
-    def test_generate_ydl_options(self):
-        result = self.tu.generate_ydl_options(mocked_ydl_progress_hook)
+    def test_generate_gdl_options_with_download_archive(self):
+        result = self.tu.generate_gdl_options(use_download_archive=True)
 
-        expected_result = {
-            'outtmpl': os.path.join(
-                self.tu.dir_path['downloads'], '%(id)s.%(ext)s'),
-            'restrictfilenames': True,
-            'verbose': False,
-            'quiet': True,
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': self.tu.logger,
-            'progress_hooks': [mocked_ydl_progress_hook]}
+        self.assertEqual(result['extractor']['archive'],
+                         os.path.join(self.tu.dir_path['root'],
+                                      '.gallerydlarchive'))
 
-        self.assertEqual(result, expected_result)
+    def test_generate_gdl_options_with_proxy(self):
+        result = self.tu.generate_gdl_options(
+            proxy_url='http://proxytest.com:8080')
 
-    def test_generate_ydl_options_with_proxy(self):
-        result = self.tu.generate_ydl_options(
-            mocked_ydl_progress_hook, proxy_url='http://proxytest.com:8080')
+        self.assertEqual(result['extractor']['proxy'],
+                         'http://proxytest.com:8080')
 
-        expected_result = {
-            'outtmpl': os.path.join(
-                self.tu.dir_path['downloads'], '%(id)s.%(ext)s'),
-            'restrictfilenames': True,
-            'verbose': False,
-            'quiet': True,
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': self.tu.logger,
-            'progress_hooks': [mocked_ydl_progress_hook],
-            'proxy': 'http://proxytest.com:8080'}
+    def test_generate_gdl_options_with_cookies(self):
+        result = self.tu.generate_gdl_options(cookie_file='cookies.txt')
 
-        self.assertEqual(result, expected_result)
+        self.assertEqual(result['extractor']['cookies'], 'cookies.txt')
 
-    def test_generate_ydl_options_with_ydl_account(self):
-        result = self.tu.generate_ydl_options(
-            mocked_ydl_progress_hook, ydl_username='testUsername',
-            ydl_password='testPassword')
+    def test_generate_gdl_options_with_gdl_account(self):
+        result = self.tu.generate_gdl_options(
+            gdl_username='testUsername', gdl_password='testPassword')
 
-        expected_result = {
-            'outtmpl': os.path.join(
-                self.tu.dir_path['downloads'], '%(id)s.%(ext)s'),
-            'restrictfilenames': True,
-            'verbose': False,
-            'quiet': True,
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': self.tu.logger,
-            'progress_hooks': [mocked_ydl_progress_hook],
-            'username': 'testUsername',
-            'password': 'testPassword'}
+        self.assertEqual(result['extractor']['username'], 'testUsername')
+        self.assertEqual(result['extractor']['password'], 'testPassword')
 
-        self.assertEqual(result, expected_result)
+    def test_generate_gdl_options_with_output_template(self):
+        tu = TubeUp(output_template='{category}_{id}.{extension}')
+        result = tu.generate_gdl_options()
 
-    def test_generate_ydl_options_with_verbose_mode(self):
+        self.assertEqual(result['extractor']['filename'],
+                         '{category}_{id}.{extension}')
+
+    def test_generate_gdl_options_with_verbose_mode(self):
         tu = TubeUp(verbose=True)
-        result = tu.generate_ydl_options(
-            mocked_ydl_progress_hook, ydl_username='testUsername',
-            ydl_password='testPassword')
+        result = tu.generate_gdl_options()
 
-        expected_result = {
-            'outtmpl': os.path.join(
-                self.tu.dir_path['downloads'], '%(id)s.%(ext)s'),
-            'restrictfilenames': True,
-            'verbose': True,
-            'quiet': False,
-            'progress_with_newline': True,
-            'forcetitle': True,
-            'continuedl': True,
-            'retries': 9001,
-            'fragment_retries': 9001,
-            'forcejson': False,
-            'writeinfojson': True,
-            'writedescription': True,
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'allsubtitles': True,
-            'ignoreerrors': True,
-            'fixup': 'detect_or_warn',
-            'nooverwrites': True,
-            'consoletitle': True,
-            'logger': tu.logger,
-            'progress_hooks': [mocked_ydl_progress_hook],
-            'username': 'testUsername',
-            'password': 'testPassword'}
+        self.assertEqual(result['output'], {'mode': 'auto', 'skip': True})
 
-        self.assertEqual(result, expected_result)
+    def test_write_info_json(self):
+        basename = downloads_path('write_info_json_test')
+        os.makedirs(os.path.dirname(basename), exist_ok=True)
 
-    def test_create_archive_org_metadata_from_youtubedl_meta(self):
-        with open(get_testfile_path(
-                'Mountain_3_-_Video_Background_HD_1080p-6iRV8liah8A.info.json')
-        ) as f:
-            vid_meta = json.load(f)
+        json_path = TubeUp.write_info_json(
+            basename,
+            {'category': 'twitter', 'id': 1, '_private': object(),
+             'date': datetime(2023, 9, 8, 12, 34, 56)},
+            TWEET_URL)
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+        with open(json_path) as f:
+            result = json.load(f)
+        os.remove(json_path)
 
-        expected_result = {
-            'mediatype': 'movies',
-            'channel': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-            'creator': 'Video Background',
-            'collection': 'opensource_movies',
-            'title': 'Mountain 3 - Video Background HD 1080p',
-            'description': ('Mountain 3 - Video Background HD 1080p<br>'
-                            'If you use this video please put credits to my '
-                            'channel in description:<br>https://www.youtube.com'
-                            '/channel/UCWpsozCMdAnfI16rZHQ9XDg<br>© Don\'t '
-                            'forget to SUBSCRIBE, LIKE, COMMENT and RATE. '
-                            'Hope you all enjoy!'),
-            'date': '2015-01-05',
-            'year': '2015',
-            'subject': ('Youtube;video;Entertainment;Video Background;Footage;'
-                        'Animation;Cinema;stock video footage;Royalty '
-                        'free videos;Creative Commons videos;free movies '
-                        'online;youtube;HD;1080p;Amazing Nature;Mountain;'),
-            'originalurl': 'https://www.youtube.com/watch?v=6iRV8liah8A',
-            'licenseurl': 'https://creativecommons.org/licenses/by/3.0/',
-            'scanner': SCANNER}
+        self.assertEqual(json_path, basename + '.info.json')
+        self.assertNotIn('_private', result)
+        self.assertEqual(result['category'], 'twitter')
+        self.assertEqual(result['webpage_url'], TWEET_URL)
+        self.assertEqual(result['date'], '2023-09-08 12:34:56')
 
-        self.assertEqual(expected_result, result)
+    def test_create_archive_org_metadata_from_gallerydl_meta(self):
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            load_tweet_meta(), TWEET_BASENAME)
 
-    def test_create_archive_org_metadata_from_youtubedl_meta_description_text_null(self):
-        with open(get_testfile_path(
-                'description_text_null.json')
-        ) as f:
-            vid_meta = json.load(f)
+        self.assertEqual(TWEET_METADATA, result)
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+    def test_create_archive_org_metadata_from_gallerydl_meta_with_title(self):
+        vid_meta = load_tweet_meta()
+        vid_meta['title'] = 'Mountain sketch'
 
-        expected_description = ('')
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
-        self.assertEqual(expected_description, result.get('description'))
+        self.assertEqual(result['title'], 'Mountain sketch')
 
-    def test_create_archive_org_metadata_from_youtubedl_meta_no_uploader(self):
-        with open(get_testfile_path(
-                'Mountain_3_-_Video_Background_HD_1080p-6iRV8liah8A.info_no_'
-                'uploader.json')
-        ) as f:
-            vid_meta = json.load(f)
+    def test_create_archive_org_metadata_from_gallerydl_meta_no_uploader(self):
+        vid_meta = load_tweet_meta()
+        del vid_meta['author']
+        del vid_meta['user']
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
-        expected_result = {
-            'mediatype': 'movies',
-            'channel': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-            'creator': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-            'collection': 'opensource_movies',
-            'title': 'Mountain 3 - Video Background HD 1080p',
-            'description': ('Mountain 3 - Video Background HD 1080p<br>'
-                            'If you use this video please put credits to my '
-                            'channel in description:<br>https://www.youtube.com'
-                            '/channel/UCWpsozCMdAnfI16rZHQ9XDg<br>© Don\'t '
-                            'forget to SUBSCRIBE, LIKE, COMMENT and RATE. '
-                            'Hope you all enjoy!'),
-            'date': '2015-01-05',
-            'year': '2015',
-            'subject': ('Youtube;video;Entertainment;Video Background;Footage;'
-                        'Animation;Cinema;stock video footage;Royalty '
-                        'free videos;Creative Commons videos;free movies '
-                        'online;youtube;HD;1080p;Amazing Nature;Mountain;'),
-            'originalurl': 'https://www.youtube.com/watch?v=6iRV8liah8A',
-            'licenseurl': 'https://creativecommons.org/licenses/by/3.0/',
-            'scanner': SCANNER}
+        self.assertEqual(result['creator'], 'tubeup.py')
 
-        self.assertEqual(expected_result, result)
+    def test_create_archive_org_metadata_from_gallerydl_meta_string_uploader(self):
+        vid_meta = load_tweet_meta()
+        del vid_meta['author']
+        vid_meta['user'] = 'someone'
 
-    def test_create_archive_org_metadata_from_youtubedl_meta_no_date(self):
-        with open(get_testfile_path(
-                'Mountain_3_-_Video_Background_HD_1080p-6iRV8liah8A.'
-                'info_no_date.json')
-        ) as f:
-            vid_meta = json.load(f)
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+        self.assertEqual(result['creator'], 'someone')
 
-        upload_date = time.strftime("%Y-%m-%d")
-        upload_year = time.strftime("%Y")
+    def test_create_archive_org_metadata_from_gallerydl_meta_no_date(self):
+        vid_meta = load_tweet_meta()
+        del vid_meta['date']
 
-        expected_result = {
-            'mediatype': 'movies',
-            'channel': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-            'creator': 'Video Background',
-            'collection': 'opensource_movies',
-            'title': 'Mountain 3 - Video Background HD 1080p',
-            'description': ('Mountain 3 - Video Background HD 1080p<br>'
-                            'If you use this video please put credits to my '
-                            'channel in description:<br>https://www.youtube.com'
-                            '/channel/UCWpsozCMdAnfI16rZHQ9XDg<br>© Don\'t '
-                            'forget to SUBSCRIBE, LIKE, COMMENT and RATE. '
-                            'Hope you all enjoy!'),
-            'date': upload_date,
-            'year': upload_year,
-            'subject': ('Youtube;video;Entertainment;Video Background;Footage;'
-                        'Animation;Cinema;stock video footage;Royalty '
-                        'free videos;Creative Commons videos;free movies '
-                        'online;youtube;HD;1080p;Amazing Nature;Mountain;'),
-            'originalurl': 'https://www.youtube.com/watch?v=6iRV8liah8A',
-            'licenseurl': 'https://creativecommons.org/licenses/by/3.0/',
-            'scanner': SCANNER}
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
-        self.assertEqual(expected_result, result)
+        self.assertEqual(result['date'], time.strftime("%Y-%m-%d"))
+        self.assertEqual(result['year'], time.strftime("%Y"))
 
-    def test_create_archive_org_metadata_from_youtubedl_meta_twitch_clips(self):
-        with open(get_testfile_path(
-                'EA_Play_2016_Live_from_the_Novo_Theatre-42850523.info.json')
-        ) as f:
-            vid_meta = json.load(f)
+    def test_create_archive_org_metadata_from_gallerydl_meta_no_description(self):
+        vid_meta = load_tweet_meta()
+        vid_meta['content'] = None
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
-        expected_result = {
-            'mediatype': 'movies',
-            'creator': 'EA',
-            'collection': 'opensource_movies',
-            'title': 'EA Play 2016 Live from the Novo Theatre',
-            'description': (''),
-            'date': '2016-06-12',
-            'year': '2016',
-            'subject': 'TwitchClips;video;',
-            'originalurl': 'https://clips.twitch.tv/FaintLightGullWholeWheat',
-            'licenseurl': '',
-            'scanner': SCANNER}
+        self.assertEqual(result['description'], '')
 
-        self.assertEqual(expected_result, result)
+    def test_create_archive_org_metadata_from_gallerydl_meta_string_tags(self):
+        vid_meta = load_tweet_meta()
+        del vid_meta['hashtags']
+        vid_meta['category'] = 'danbooru'
+        vid_meta['tags'] = 'mountain landscape sky'
 
-    def test_create_archive_org_metadata_from_youtubedl_meta_mass_of_tags(self):
-        with open(get_testfile_path(
-                'Mountain_3_-_Video_Background_HD_1080p-6iRV8liah8A.info.json')
-        ) as f:
-            vid_meta = json.load(f)
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
+        self.assertEqual(result['subject'],
+                         'danbooru;image;mountain;landscape;sky;')
+
+    def test_create_archive_org_metadata_from_gallerydl_meta_mass_of_tags(self):
+        vid_meta = load_tweet_meta()
         vid_meta['tags'] = [f't{i}' for i in range(0, 300)]
 
-        result = TubeUp.create_archive_org_metadata_from_youtubedl_meta(
-            vid_meta
-        )
+        result = TubeUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
 
         self.assertLessEqual(len(result['subject'].encode(encoding='utf-8')),
                              255, msg='tags_string not truncated to <= 255 bytes')
@@ -470,15 +317,16 @@ class TubeUpTests(unittest.TestCase):
 
         copy_testfiles_to_tubeup_rootdir_test()
 
-        result = tu.get_resource_basenames(
-            ['https://www.youtube.com/watch?v=KdsN9YhkDrY'],
-            ignore_existing_item=True)
+        with patch.object(TubeUp, 'apply_gdl_options'):
+            result = tu.get_resource_basenames([TWEET_URL],
+                                               ignore_existing_item=True)
 
-        expected_result = {os.path.join(
-            current_path, 'test_tubeup_rootdir', 'downloads',
-            'KdsN9YhkDrY')}
+        expected_result = {downloads_path(TWEET_BASENAME)}
 
         self.assertEqual(expected_result, result)
+
+        with open(downloads_path(TWEET_BASENAME + '.info.json')) as f:
+            self.assertEqual(json.load(f)['webpage_url'], TWEET_URL)
 
     def test_upload_ia(self):
         tu = TubeUp(dir_path=os.path.join(current_path,
@@ -487,11 +335,15 @@ class TubeUpTests(unittest.TestCase):
                     # to login with username and password.
                     ia_config_path=get_testfile_path('ia_config_for_test.ini'))
 
-        videobasename = os.path.join(
-            current_path, 'test_tubeup_rootdir', 'downloads',
-            'Mountain_3_-_Video_Background_HD_1080p-6iRV8liah8A')
+        basename = downloads_path(TWEET_BASENAME)
 
         copy_testfiles_to_tubeup_rootdir_test()
+
+        # A file whose name merely starts with the basename must not be
+        # uploaded as part of this item.
+        other_file = downloads_path(TWEET_BASENAME + '0.jpg')
+        with open(other_file, 'wb') as f:
+            f.write(b'not part of this item')
 
         with requests_mock.Mocker() as m:
             # Mock the request to s3.us.archive.org, so it will responds
@@ -501,56 +353,50 @@ class TubeUpTests(unittest.TestCase):
                   content=b'{"over_limit": 0}',
                   headers={'content-type': 'application/json'})
 
-            m.get('https://archive.org/metadata/youtube-6iRV8liah8A',
+            m.get('https://archive.org/metadata/%s' % TWEET_ITEMNAME,
                   content=b'{}',
                   headers={'content-type': 'application/json'})
 
             # Mock the PUT requests for internetarchive urls that defined
-            # in mock_upload_response_by_videobasename(), so this test
+            # in mock_upload_response_by_basename(), so this test
             # doesn't perform upload to the real archive.org server.
-            mock_upload_response_by_videobasename(
-                m, 'youtube-6iRV8liah8A', videobasename)
+            mock_upload_response_by_basename(m, TWEET_ITEMNAME, basename)
 
-            result = tu.upload_ia(videobasename)
+            result = tu.upload_ia(basename)
 
-            expected_result = (
-                'youtube-6iRV8liah8A',
-                {'mediatype': 'movies',
-                 'channel': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-                 'creator': 'Video Background',
-                 'collection': 'opensource_movies',
-                 'title': 'Mountain 3 - Video Background HD 1080p',
-                 'description': ('Mountain 3 - Video Background HD 1080p<br>If '
-                                 'you use this video please put credits to my'
-                                 ' channel in description:<br>https://www.youtub'
-                                 'e.com/channel/UCWpsozCMdAnfI16rZHQ9XDg<br>© D'
-                                 'on\'t forget to SUBSCRIBE, LIKE, COMMENT an'
-                                 'd RATE. Hope you all enjoy!'),
-                 'date': '2015-01-05',
-                 'year': '2015',
-                 'subject': ('Youtube;video;Entertainment;Video Background;'
-                             'Footage;Animation;Cinema;stock video footage;'
-                             'Royalty free videos;Creative Commons videos;'
-                             'free movies online;youtube;HD;1080p;Amazing '
-                             'Nature;Mountain;'),
-                 'originalurl': 'https://www.youtube.com/watch?v=6iRV8liah8A',
-                 'licenseurl': 'https://creativecommons.org/licenses/by/3.0/',
-                 'scanner': SCANNER})
+        self.assertEqual((TWEET_ITEMNAME, TWEET_METADATA), result)
+        self.assertTrue(os.path.exists(other_file))
+        os.remove(other_file)
 
-            self.assertEqual(expected_result, result)
+    def test_upload_ia_incomplete_download(self):
+        tu = TubeUp(dir_path=os.path.join(current_path,
+                                          'test_tubeup_rootdir'),
+                    ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+
+        basename = downloads_path(TWEET_BASENAME)
+
+        copy_testfiles_to_tubeup_rootdir_test()
+        part_file = basename + '.jpg.part'
+        with open(part_file, 'wb'):
+            pass
+
+        try:
+            with self.assertRaisesRegex(Exception, 'Download incomplete'):
+                tu.upload_ia(basename)
+        finally:
+            os.remove(part_file)
 
     def test_archive_urls(self):
         tu = TubeUp(dir_path=os.path.join(current_path,
                                           'test_tubeup_rootdir'),
                     ia_config_path=get_testfile_path('ia_config_for_test.ini'))
 
-        videobasename = os.path.join(
-            current_path, 'test_tubeup_rootdir', 'downloads',
-            'KdsN9YhkDrY')
+        basename = downloads_path(TWEET_BASENAME)
 
         copy_testfiles_to_tubeup_rootdir_test()
 
-        with requests_mock.Mocker() as m:
+        with requests_mock.Mocker() as m, \
+                patch.object(TubeUp, 'apply_gdl_options'):
             # Mock the request to s3.us.archive.org, so it will responds
             # a custom json. `internetarchive` library sends GET request to
             # that url to check that we don't violate the upload limit.
@@ -558,43 +404,65 @@ class TubeUpTests(unittest.TestCase):
                   content=b'{"over_limit": 0}',
                   headers={'content-type': 'application/json'})
 
-            m.get('https://archive.org/metadata/youtube-KdsN9YhkDrY',
+            # The item doesn't exist yet, both for the existence check done
+            # before downloading and for the upload.
+            m.get('https://archive.org/metadata/%s' % TWEET_ITEMNAME,
                   content=b'{}',
                   headers={'content-type': 'application/json'})
 
             # Mock the PUT requests for internetarchive urls that defined
-            # in mock_upload_response_by_videobasename(), so this test
+            # in mock_upload_response_by_basename(), so this test
             # doesn't perform upload to the real archive.org server.
-            mock_upload_response_by_videobasename(
-                m, 'youtube-KdsN9YhkDrY', videobasename)
+            mock_upload_response_by_basename(m, TWEET_ITEMNAME, basename)
 
-            result = list(tu.archive_urls(
-                ['https://www.youtube.com/watch?v=KdsN9YhkDrY']))
+            result = list(tu.archive_urls([TWEET_URL]))
 
-            expected_result = [(
-                'youtube-KdsN9YhkDrY',
-                {'mediatype': 'movies',
-                 'creator': 'RelaxingWorld',
-                 'channel': 'http://www.youtube.com/channel/UCWpsozCMdAnfI16rZHQ9XDg',
-                 'collection': 'opensource_movies',
-                 'title': 'Epic Ramadan - Video Background HD1080p',
-                 'description': ('If you enjoy my work, please consider Subscribe to my NEW '
-                                 'channel for more videos: <br>'
-                                 'https://www.youtube.com/MusicForRelaxation?sub_confirmation=1 <br>'
-                                 '▷ If you use this video, please put credits to my channel '
-                                 'in description: <br>'
-                                 'Source from RelaxingWorld: https://goo.gl/HsW75m<br>'
-                                 '<br>'
-                                 '▷ Also, do not forget to Subscribe to my channel. Thanks!'),
-                 'date': '2016-06-25',
-                 'year': '2016',
-                 'subject': ('Youtube;video;Film & Animation;Video Background;'
-                             'Footage;Animation;Cinema;Royalty Free Videos;'
-                             'Stock Video Footage;Video Backdrops;'
-                             'Amazing Nature;youtube;HD;1080p;Creative Commons Videos;'
-                             'relaxing music;Ramadan;'),
-                 'originalurl': 'https://www.youtube.com/watch?v=KdsN9YhkDrY',
-                 'licenseurl': '',
-                 'scanner': SCANNER})]
+        self.assertEqual([(TWEET_ITEMNAME, TWEET_METADATA)], result)
 
-            self.assertEqual(expected_result, result)
+
+class GalleryJobTests(unittest.TestCase):
+    """Run the real gallery-dl machinery against a mocked direct link."""
+
+    IMAGE_URL = 'https://example.org/media/galleryjob_test.jpg'
+
+    def setUp(self):
+        self.tu = TubeUp(dir_path=os.path.join(current_path,
+                                               'test_tubeup_rootdir'))
+        self.tu.apply_gdl_options(self.tu.generate_gdl_options())
+        self.reported = []
+
+    def tearDown(self):
+        shutil.rmtree(downloads_path('directlink'), ignore_errors=True)
+
+    def on_file(self, filepath, kwdict, page_url):
+        self.reported.append((filepath, kwdict['category'], page_url))
+
+    def test_reports_downloaded_file(self):
+        with requests_mock.Mocker() as m:
+            m.get(self.IMAGE_URL, content=b'image data',
+                  headers={'content-type': 'image/jpeg'})
+            GalleryJob(self.IMAGE_URL, on_file=self.on_file).run()
+
+        self.assertEqual(len(self.reported), 1)
+        filepath, category, page_url = self.reported[0]
+        self.assertTrue(filepath.startswith(downloads_path('directlink')))
+        self.assertTrue(filepath.endswith('galleryjob_test.jpg'))
+        self.assertTrue(os.path.isfile(filepath))
+        self.assertEqual(category, 'directlink')
+        self.assertEqual(page_url, self.IMAGE_URL)
+
+    def test_should_skip_prevents_download(self):
+        checked = []
+
+        def should_skip(kwdict, basename):
+            checked.append(basename)
+            return True
+
+        with requests_mock.Mocker() as m:
+            GalleryJob(self.IMAGE_URL, on_file=self.on_file,
+                       should_skip=should_skip).run()
+            self.assertEqual(m.call_count, 0)
+
+        self.assertEqual(len(checked), 1)
+        self.assertTrue(checked[0].endswith('galleryjob_test'))
+        self.assertEqual(self.reported, [])
