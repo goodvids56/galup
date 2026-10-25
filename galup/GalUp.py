@@ -494,17 +494,17 @@ class GalUp(object):
         return licenseurl
 
     @staticmethod
-    def _first_text(file_meta, keys):
+    def _first_text(file_meta, keys, dict_keys=('name', 'username', 'nick')):
         """
         Return the first non-empty string value found under one of `keys`.
-        Dict values (e.g. gallery-dl's `user` or `author`) are searched for a
-        name-like field.
+        Dict values (e.g. gallery-dl's `user` or `author`) are searched for
+        the first of `dict_keys` they contain.
         """
         for key in keys:
             value = file_meta.get(key)
             if isinstance(value, dict):
-                value = (value.get('name') or value.get('username') or
-                         value.get('nick'))
+                value = next((value[k] for k in dict_keys if value.get(k)),
+                             None)
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
@@ -545,11 +545,17 @@ class GalUp(object):
         title = GalUp._first_text(file_meta, ('title', 'post_title')) or \
             '%s %s' % (category, basename)
 
+        # Use the uploader's username rather than their display name, as it
+        # is stable and unique. Extractors store it differently, e.g.
+        # `author[name]` (twitter), `author[uniqueId]` (tiktok),
+        # `author[handle]` (bluesky) or `user[account]` (pixiv).
         # Some services don't tell you the uploader,
         # use our program's name in that case.
         uploader = GalUp._first_text(
-            file_meta, ('uploader', 'artist', 'author', 'user', 'username',
-                        'creator', 'owner')) or 'galup'
+            file_meta, ('username', 'author', 'user', 'uploader', 'owner',
+                        'creator', 'artist'),
+            dict_keys=('username', 'account', 'handle', 'uniqueId',
+                       'screen_name', 'name')) or 'galup'
 
         try:  # some files don't give an upload date
             d = datetime.fromisoformat(str(file_meta['date']))

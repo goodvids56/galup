@@ -271,6 +271,30 @@ class GalUpTests(unittest.TestCase):
 
         self.assertEqual(result['creator'], 'someone')
 
+    def test_create_archive_org_metadata_from_gallerydl_meta_username(self):
+        metas = [
+            ('tiktok', {'author': {'uniqueId': 'blossom_lovecn',
+                                   'nickname': 'Blossom'},
+                        'user': 'blossom_lovecn'}),
+            ('bluesky', {'author': {'did': 'did:plc:abc',
+                                    'handle': 'someone.bsky.social',
+                                    'displayName': 'Someone'}}),
+            ('pixiv', {'user': {'id': 1, 'name': 'Display Name',
+                                'account': 'account_name'}}),
+            ('instagram', {'username': 'insta_user', 'fullname': 'Insta',
+                           'owner_id': '123'}),
+            ('kemono', {'user': '12345', 'username': 'creator'}),
+        ]
+        expected = ['blossom_lovecn', 'someone.bsky.social', 'account_name',
+                    'insta_user', 'creator']
+
+        result = [
+            GalUp.create_archive_org_metadata_from_gallerydl_meta(
+                dict(meta, category=category), 'x')['creator']
+            for category, meta in metas]
+
+        self.assertEqual(result, expected)
+
     def test_create_archive_org_metadata_from_gallerydl_meta_no_date(self):
         vid_meta = load_tweet_meta()
         del vid_meta['date']
