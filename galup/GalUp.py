@@ -43,7 +43,8 @@ class GalleryJob(DownloadJob):
     gallery-dl DownloadJob that reports every file it downloads (or finds
     already on disk) together with the post it belongs to, and can skip posts
     whose archive.org item already exists. After the files of a post, it
-    downloads the post's thumbnail, if its metadata has one, to `{id}.{ext}`.
+    downloads the post's thumbnail, if its metadata has one, to
+    `{id}.thumbnail.{ext}`.
 
     Child jobs (e.g. the posts of a user profile) are created by gallery-dl
     with `self.__class__(extractor, parent)`, so the callbacks are inherited
@@ -93,8 +94,8 @@ class GalleryJob(DownloadJob):
 
     def download_thumbnail(self):
         """
-        Download the thumbnail of the current post to `{id}.{ext}`, once all
-        its files have been downloaded.
+        Download the thumbnail of the current post to `{id}.thumbnail.{ext}`,
+        once all its files have been downloaded.
         """
         kwdict, self.post_kwdict = self.post_kwdict, None
         if kwdict is None or not self.post_files:
@@ -103,8 +104,8 @@ class GalleryJob(DownloadJob):
         if url is None:
             return
 
-        # A post with a single image is named `{id}.{ext}` already, and is
-        # its own thumbnail
+        # A post with a single image, named `{id}.{ext}`, is its own
+        # thumbnail
         for filepath in self.post_files:
             name, extension = os.path.splitext(os.path.basename(filepath))
             extension = extension[1:].lower()
@@ -121,7 +122,7 @@ class GalleryJob(DownloadJob):
         thumbnail.update({
             'type': 'thumbnail',
             'file_url': url,
-            '_galup_filename': self.post_name,
+            '_galup_filename': self.post_name + '.thumbnail',
         })
         DownloadJob.handle_url(self, url, thumbnail)
 

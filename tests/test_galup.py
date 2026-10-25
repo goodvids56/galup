@@ -521,6 +521,7 @@ class GalUpTests(unittest.TestCase):
                     if num is None:
                         # The slideshow's thumbnail
                         kwdict['type'] = 'thumbnail'
+                        name += '.thumbnail'
                     filepath = os.path.join(post_dir, '%s.%s' % (
                         name, extension))
                     with open(filepath, 'wb') as f:
@@ -560,8 +561,8 @@ class GalUpTests(unittest.TestCase):
         self.assertEqual(meta['mediatype'], 'image')
         self.assertEqual(meta['title'], 'Educational video! #fyp #中国人')
         self.assertEqual(uploaded, [
-            '7700361800876920077.info.json', '7700361800876920077.jpg',
-            '7700361800876920077.mp3', '7700361800876920077_1.jpg',
+            '7700361800876920077.info.json', '7700361800876920077.mp3',
+            '7700361800876920077.thumbnail.jpg', '7700361800876920077_1.jpg',
             '7700361800876920077_2.jpg'])
 
 
@@ -713,9 +714,9 @@ class GalleryJobTests(unittest.TestCase):
 
         user_dir = downloads_path('galupthumbs', 'someone')
         self.assertEqual(sorted(os.listdir(user_dir)), [
-            '201.info.json', '201.jpg', '201.mp4',
+            '201.info.json', '201.mp4', '201.thumbnail.jpg',
             '202.info.json', '202.jpg',
-            '203.info.json', '203.jpg', '203_1.jpg', '203_2.jpg'])
+            '203.info.json', '203.thumbnail.jpg', '203_1.jpg', '203_2.jpg'])
         # The single image post isn't given a thumbnail
         self.assertEqual(thumbnails, ['/201/thumb.jpg', '/203/thumb.jpg'])
 
@@ -723,5 +724,5 @@ class GalleryJobTests(unittest.TestCase):
         reported = [(os.path.basename(filepath),
                      os.path.basename(post_basename))
                     for filepath, _, _, post_basename in self.reported]
-        self.assertIn(('201.jpg', '201'), reported)
-        self.assertIn(('203.jpg', '203'), reported)
+        self.assertIn(('201.thumbnail.jpg', '201'), reported)
+        self.assertIn(('203.thumbnail.jpg', '203'), reported)
