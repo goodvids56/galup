@@ -38,6 +38,17 @@ class UtilsTest(unittest.TestCase):
         self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
         self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
 
+    def test_get_itemname_strips_non_ascii(self):
+        itemname = get_itemname(
+            'tiktok',
+            '/downloads/tiktok/user/7700361800876920077 Educational! '
+            '#fyp #中国人 #中国  [7686696195469609741]')
+        self.assertEqual(
+            itemname,
+            'tiktok-7700361800876920077-Educational---fyp------------'
+            '7686696195469609741-')
+        self.assertRegex(itemname, r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{4,100}$')
+
     def test_check_is_file_empty_when_file_is_empty(self):
         # Create a file for the test
         with open('testemptyfile.txt', 'w'):

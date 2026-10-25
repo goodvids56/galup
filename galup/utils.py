@@ -24,7 +24,10 @@ def key_value_to_dict(lst):
 
 
 def sanitize_identifier(identifier, replacement='-'):
-    return re.sub(r'[^\w-]', replacement, identifier)
+    # archive.org identifiers may only contain ASCII letters, digits, '_' and
+    # '-' ('.' is allowed too but kept out for consistency); `\w` alone would
+    # also match non-ASCII letters such as Chinese characters
+    return re.sub(r'[^A-Za-z0-9_-]', replacement, identifier)
 
 
 def get_itemname(category, basename):
