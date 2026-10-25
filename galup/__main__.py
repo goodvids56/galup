@@ -54,7 +54,9 @@ Options:
                                the archive file.
   -q --quiet                   Just print errors.
   -d --debug                   Print all logs to stdout.
-  -o --output <output>         gallery-dl filename format string.
+  -o --output <output>         gallery-dl filename format string. Defaults to
+                               {id}.{extension}, or {id}_{num}.{extension}
+                               for posts with several files.
   -i --ignore-existing-item    Don't check if an item already exists on archive.org
 """
 

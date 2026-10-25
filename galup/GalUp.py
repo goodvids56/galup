@@ -1,8 +1,6 @@
 import os
 import re
-import glob
 import time
-import json
 import logging
 import collections
 import internetarchive
@@ -11,8 +9,10 @@ from internetarchive.config import parse_config_file
 from datetime import datetime
 from gallery_dl import config as gdl_config
 from gallery_dl import exception as gdl_exception
+from gallery_dl import text as gdl_text
 from gallery_dl.job import DownloadJob
-from .utils import get_itemname
+from .utils import (get_itemname, get_filename, get_post_name,
+                    get_thumbnail_url)
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -24,12 +24,26 @@ DOWNLOAD_DIR_NAME = 'downloads'
 VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
                     'ts', 'mpg', 'mpeg', '3gp'}
 AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
+IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'bmp'}
+
+# Profile URLs of uploaders by gallery-dl category, used for the `channel`
+# metadata
+CHANNEL_URLS = {
+    'bluesky': 'https://bsky.app/profile/{username}',
+    'deviantart': 'https://www.deviantart.com/{username}',
+    'instagram': 'https://www.instagram.com/{username}/',
+    'reddit': 'https://www.reddit.com/user/{username}',
+    'tiktok': 'https://www.tiktok.com/@{username}',
+    'twitter': 'https://x.com/{username}',
+}
 
 
 class GalleryJob(DownloadJob):
     """
     gallery-dl DownloadJob that reports every file it downloads (or finds
-    already on disk) and can skip files whose archive.org item already exists.
+    already on disk) together with the post it belongs to, and can skip posts
+    whose archive.org item already exists. After the files of a post, it
+    downloads the post's thumbnail, if its metadata has one, to `{id}.{ext}`.
 
     Child jobs (e.g. the posts of a user profile) are created by gallery-dl
     with `self.__class__(extractor, parent)`, so the callbacks are inherited
@@ -43,6 +57,10 @@ class GalleryJob(DownloadJob):
             should_skip = parent.should_skip
         self.on_file = on_file
         self.should_skip = should_skip
+        self.post_name = None
+        # Metadata and downloaded files of the current post
+        self.post_kwdict = None
+        self.post_files = []
 
     def initialize(self, kwdict=None):
         DownloadJob.initialize(self, kwdict)
@@ -53,16 +71,70 @@ class GalleryJob(DownloadJob):
         self.register_hooks({'after': self._report_file,
                              'skip': self._report_file})
 
+    def handle_directory(self, kwdict):
+        # gallery-dl starts every post with a directory message. Name the post
+        # after its ID; this names the post's .info.json, written by
+        # gallery-dl's metadata post processor (see
+        # `GalUp.generate_gdl_options`), and its archive.org item.
+        self.download_thumbnail()
+        self.post_name = get_post_name(kwdict)
+        self.post_kwdict = kwdict
+        self.post_files = []
+        kwdict['_galup_post'] = self.post_name
+        DownloadJob.handle_directory(self, kwdict)
+
+    def handle_finalize(self):
+        try:
+            self.download_thumbnail()
+        except Exception as exc:
+            self.extractor.log.warning('Failed to download thumbnail (%s: %s)',
+                                       exc.__class__.__name__, exc)
+        DownloadJob.handle_finalize(self)
+
+    def download_thumbnail(self):
+        """
+        Download the thumbnail of the current post to `{id}.{ext}`, once all
+        its files have been downloaded.
+        """
+        kwdict, self.post_kwdict = self.post_kwdict, None
+        if kwdict is None or not self.post_files:
+            return
+        url = get_thumbnail_url(kwdict)
+        if url is None:
+            return
+
+        # A post with a single image is named `{id}.{ext}` already, and is
+        # its own thumbnail
+        for filepath in self.post_files:
+            name, extension = os.path.splitext(os.path.basename(filepath))
+            extension = extension[1:].lower()
+            if name == self.post_name and \
+                    extension not in VIDEO_EXTENSIONS | AUDIO_EXTENSIONS:
+                return
+
+        thumbnail = dict(kwdict)
+        gdl_text.nameext_from_url(url, thumbnail)
+        if thumbnail.get('extension', '').lower() not in IMAGE_EXTENSIONS:
+            # gallery-dl corrects it from the downloaded file if needed
+            thumbnail['extension'] = 'jpg'
+        thumbnail.pop('num', None)
+        thumbnail.update({
+            'type': 'thumbnail',
+            'file_url': url,
+            '_galup_filename': self.post_name,
+        })
+        DownloadJob.handle_url(self, url, thumbnail)
+
     def handle_url(self, url, kwdict):
+        # Used by the default filename format, see `GalUp.generate_gdl_options`
+        kwdict['_galup_filename'] = (get_filename(kwdict) or
+                                     kwdict.get('filename') or 'file')
+        if self.post_name is None:
+            self.post_name = get_post_name(kwdict)
         if self.should_skip is not None:
-            if self.pathfmt is None:
-                self.initialize(kwdict)
-            self.pathfmt.set_filename(kwdict)
-            basename = self.pathfmt.build_filename(kwdict)
-            if self.pathfmt.extension:
-                basename = basename[:-len(self.pathfmt.extension)]
-            basename = basename.rstrip('.')
-            if self.should_skip(kwdict, basename):
+            if self.should_skip(kwdict, self.post_name):
+                if self.pathfmt is None:
+                    self.initialize(kwdict)
                 if self.archive is not None:
                     self.archive.add(kwdict)
                 return
@@ -71,7 +143,13 @@ class GalleryJob(DownloadJob):
     def _report_file(self, pathfmt):
         filepath = pathfmt.realpath
         if filepath and os.path.isfile(filepath):
-            self.on_file(filepath, pathfmt.kwdict, self.extractor.url)
+            self.post_files.append(filepath)
+            # Where gallery-dl's metadata post processor writes the post's
+            # .info.json, without the .info.json extension
+            post_basename = pathfmt.realdirectory + pathfmt.clean_path(
+                pathfmt.clean_segment(self.post_name))
+            self.on_file(filepath, pathfmt.kwdict, self.extractor.url,
+                         post_basename)
 
 
 class GalUp(object):
@@ -97,7 +175,9 @@ class GalUp(object):
                                 be used in uploading the file.
         :param output_template: A gallery-dl filename format string that will
                                 be used to generate the output filenames.
-                                Defaults to each extractor's own format.
+                                Defaults to `{id}.{extension}`, or
+                                `{id}_{num}.{extension}` for posts with
+                                several files.
         """
         self.dir_path = dir_path
         self.verbose = verbose
@@ -170,7 +250,7 @@ class GalUp(object):
                                use_download_archive=False,
                                ignore_existing_item=False):
         """
-        Download urls with gallery-dl and get the basenames of the files.
+        Download urls with gallery-dl and get the downloaded files by post.
 
         :param urls:                  A list of urls that will be downloaded with
                                       gallery-dl.
@@ -184,17 +264,22 @@ class GalUp(object):
                                       This will download only files not listed in
                                       the archive file.
         :param ignore_existing_item:  Ignores the check for existing items on archive.org.
-        :return:                      Set of file basenames that have been downloaded.
+        :return:                      A dict of the downloaded posts:
+                                      {path of the post's `.info.json` without the
+                                      `.info.json` extension: {path of a downloaded
+                                      file: its gallery-dl metadata}}
         """
-        downloaded_files_basename = set()
+        posts = collections.defaultdict(dict)
 
-        def on_file(filepath, kwdict, page_url):
-            basename = os.path.splitext(filepath)[0]
-            self.write_info_json(basename, kwdict, page_url)
-            downloaded_files_basename.add(basename)
+        def on_file(filepath, kwdict, page_url, post_basename):
+            # Copy the metadata, gallery-dl reuses the dict for the next file
+            meta = {key: value for key, value in kwdict.items()
+                    if not key.startswith('_')}
+            meta['webpage_url'] = page_url
+            posts[post_basename][filepath] = meta
 
-        def check_if_ia_item_exists(kwdict, basename):
-            itemname = get_itemname(kwdict.get('category'), basename)
+        def check_if_ia_item_exists(kwdict, post_name):
+            itemname = get_itemname(kwdict.get('category'), post_name)
             item = internetarchive.get_item(itemname)
             if item.exists:
                 if self.verbose:
@@ -221,28 +306,9 @@ class GalUp(object):
             job.run()
 
         self.logger.debug(
-            'Basenames obtained from urls (%s): %s'
-            % (urls, downloaded_files_basename))
+            'Posts obtained from urls (%s): %s' % (urls, list(posts)))
 
-        return downloaded_files_basename
-
-    @staticmethod
-    def write_info_json(basename, kwdict, page_url):
-        """
-        Write the gallery-dl metadata of a file to `<basename>.info.json`.
-
-        :param basename:  Path of the downloaded file without its extension.
-        :param kwdict:    gallery-dl metadata dictionary of the file.
-        :param page_url:  URL of the page the file was extracted from.
-        :return:          Path of the written json file.
-        """
-        meta = {key: value for key, value in kwdict.items()
-                if not key.startswith('_')}
-        meta['webpage_url'] = page_url
-        json_path = basename + '.info.json'
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(meta, f, ensure_ascii=False, indent=4, default=str)
-        return json_path
+        return dict(posts)
 
     def generate_gdl_options(self,
                              cookie_file=None,
@@ -273,8 +339,17 @@ class GalUp(object):
             'url-metadata': 'file_url',
         }
 
-        if self.output_template is not None:
-            extractor_opts['filename'] = self.output_template
+        # Name files `{id}.{extension}`, or `{id}_{num}.{extension}` when a
+        # post has several files, e.g. `{id}_1.jpg` (see `get_filename`)
+        extractor_opts['filename'] = (self.output_template or
+                                      '{_galup_filename}.{extension}')
+
+        # Write gallery-dl's metadata of each post to `{id}.info.json`
+        extractor_opts['postprocessors'] = [{
+            'name': 'metadata',
+            'event': 'post',
+            'filename': '{_galup_post}.info.json',
+        }]
 
         if cookie_file is not None:
             extractor_opts['cookies'] = cookie_file
@@ -316,36 +391,58 @@ class GalUp(object):
         gdl_config.load()
         for section, options in gdl_opts.items():
             for key, value in options.items():
+                if key == 'postprocessors':
+                    # Keep the user's own post processors
+                    value = list(gdl_config.get((section,), key) or ()) + value
                 gdl_config.set((section,), key, value)
 
-    def upload_ia(self, basename, custom_meta=None):
+    def upload_ia(self, basename, files, custom_meta=None):
         """
-        Upload a downloaded file to archive.org.
+        Upload the downloaded files of a post to a single archive.org item.
 
-        :param basename:     Path of the downloaded file without its extension.
+        :param basename:     Path of the post's `.info.json` file without its
+                             `.info.json` extension.
+        :param files:        A list of tuples of (path of a downloaded file of
+                             the post, its gallery-dl metadata).
         :param custom_meta:  A custom meta, will be used by internetarchive
                              library when uploading to archive.org.
         :return:             A tuple containing item name and metadata used
                              when uploading to archive.org.
         """
-        json_metadata_filepath = basename + '.info.json'
-        with open(json_metadata_filepath, 'r', encoding='utf-8') as f:
-            file_meta = json.load(f)
+        for filepath, _ in files:
+            # Exit if download did not complete, don't upload .part files
+            # to IA
+            if os.path.exists(filepath + '.part'):
+                msg = ('Download incomplete, please re-run or delete the '
+                       '.part files in downloads folder, exiting...')
+                raise Exception(msg)
+            if not os.path.isfile(filepath):
+                raise Exception('Downloaded file "%s" is missing, please '
+                                're-run, exiting...' % filepath)
 
-        # Exit if download did not complete, don't upload .part files to IA
-        pattern = glob.escape(basename)
-        if glob.glob(pattern + '.*.part') or glob.glob(pattern + '.part'):
-            msg = ('Download incomplete, please re-run or delete the .part '
-                   'files in downloads folder, exiting...')
-            raise Exception(msg)
+        # Build the item metadata from its main file: a video if there is
+        # one, otherwise an image, e.g. the slides of a TikTok slideshow
+        # rather than its background music, but never the thumbnail.
+        def file_priority(file):
+            extension = str(file[1].get('extension') or '').lower()
+            if file[1].get('type') == 'thumbnail':
+                return 3
+            if extension in VIDEO_EXTENSIONS:
+                return 0
+            if extension in AUDIO_EXTENSIONS:
+                return 2
+            return 1
+
+        file_meta = min(files, key=file_priority)[1]
 
         itemname = get_itemname(file_meta.get('category'), basename)
         metadata = self.create_archive_org_metadata_from_gallerydl_meta(
             file_meta, os.path.basename(basename))
 
-        # Upload all files with this basename: e.g. image.jpg and
-        # image.info.json
-        files_to_upload = glob.glob(pattern + '.*')
+        # Upload all files of the post and its .info.json
+        files_to_upload = [filepath for filepath, _ in files]
+        if os.path.isfile(basename + '.info.json'):
+            files_to_upload.append(basename + '.info.json')
 
         # Upload the item to the Internet Archive
         item = internetarchive.get_item(itemname)
@@ -400,11 +497,12 @@ class GalUp(object):
         :return:                      Tuple containing identifier and metadata of the
                                       file that has been uploaded to archive.org.
         """
-        downloaded_file_basenames = self.get_resource_basenames(
+        posts = self.get_resource_basenames(
             urls, cookie_file, proxy, gdl_username, gdl_password,
             use_download_archive, ignore_existing_item)
-        for basename in sorted(downloaded_file_basenames):
-            identifier, meta = self.upload_ia(basename, custom_meta)
+        for basename, files in sorted(posts.items()):
+            identifier, meta = self.upload_ia(basename, list(files.items()),
+                                              custom_meta)
             yield identifier, meta
 
     @staticmethod
@@ -450,17 +548,48 @@ class GalUp(object):
         return licenseurl
 
     @staticmethod
-    def _first_text(file_meta, keys):
+    def determine_channel(file_meta, username):
+        """
+        Determine the URL of the uploader's profile, like TubeUp's `channel`.
+
+        :param file_meta:  gallery-dl metadata of the file.
+        :param username:   Username of the uploader, or None if unknown.
+        :return:           Profile URL, or None if unknown.
+        """
+        for key in ('uploader_url', 'channel_url', 'author_url', 'user_url',
+                    'profile_url'):
+            value = file_meta.get(key)
+            if isinstance(value, str) and value.startswith('http'):
+                return value
+
+        category = file_meta.get('category')
+        user = file_meta.get('user')
+        if category == 'pixiv' and isinstance(user, dict) and user.get('id'):
+            return 'https://www.pixiv.net/users/%s' % user['id']
+        if category == 'kemono' and file_meta.get('service') and user:
+            return 'https://kemono.cr/%s/user/%s' % (file_meta['service'],
+                                                     user)
+        blog = file_meta.get('blog')
+        if category == 'tumblr' and isinstance(blog, dict) and \
+                blog.get('url'):
+            return blog['url']
+
+        if username and category in CHANNEL_URLS:
+            return CHANNEL_URLS[category].format(username=username)
+        return None
+
+    @staticmethod
+    def _first_text(file_meta, keys, dict_keys=('name', 'username', 'nick')):
         """
         Return the first non-empty string value found under one of `keys`.
-        Dict values (e.g. gallery-dl's `user` or `author`) are searched for a
-        name-like field.
+        Dict values (e.g. gallery-dl's `user` or `author`) are searched for
+        the first of `dict_keys` they contain.
         """
         for key in keys:
             value = file_meta.get(key)
             if isinstance(value, dict):
-                value = (value.get('name') or value.get('username') or
-                         value.get('nick'))
+                value = next((value[k] for k in dict_keys if value.get(k)),
+                             None)
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
@@ -473,7 +602,10 @@ class GalUp(object):
             tags = []
             for tag in value:
                 if isinstance(tag, dict):
-                    tag = tag.get('name')
+                    # TikTok uses `title` in `challenges` and `hashtagName`
+                    # in `textExtra`
+                    tag = (tag.get('name') or tag.get('title') or
+                           tag.get('hashtagName'))
                 if isinstance(tag, str) and tag:
                     tags.append(tag)
             return tags
@@ -498,11 +630,18 @@ class GalUp(object):
         title = GalUp._first_text(file_meta, ('title', 'post_title')) or \
             '%s %s' % (category, basename)
 
+        # Use the uploader's username rather than their display name, as it
+        # is stable and unique. Extractors store it differently, e.g.
+        # `author[name]` (twitter), `author[uniqueId]` (tiktok),
+        # `author[handle]` (bluesky) or `user[account]` (pixiv).
+        username = GalUp._first_text(
+            file_meta, ('username', 'author', 'user', 'uploader', 'owner',
+                        'creator', 'artist', 'blog_name'),
+            dict_keys=('username', 'account', 'handle', 'uniqueId',
+                       'screen_name', 'name'))
         # Some services don't tell you the uploader,
         # use our program's name in that case.
-        uploader = GalUp._first_text(
-            file_meta, ('uploader', 'artist', 'author', 'user', 'username',
-                        'creator', 'owner')) or 'galup'
+        uploader = username or 'galup'
 
         try:  # some files don't give an upload date
             d = datetime.fromisoformat(str(file_meta['date']))
@@ -517,9 +656,14 @@ class GalUp(object):
         # example: twitter;image;
         tags_string = '%s;%s;' % (category, mediatype)
 
-        for key in ('tags', 'hashtags', 'categories'):
+        tags = []
+        for key in ('tags', 'hashtags', 'categories', 'challenges',
+                    'textExtra'):
             for tag in GalUp._tags_list(file_meta.get(key)):
-                tags_string += '%s;' % tag
+                if tag not in tags:
+                    tags.append(tag)
+        for tag in tags:
+            tags_string += '%s;' % tag
 
         # IA's subject field has a 255 bytes length limit, so we need to truncate tags_string
         while len(tags_string.encode('utf-8')) > 255:
@@ -531,7 +675,8 @@ class GalUp(object):
         licenseurl = GalUp.determine_licenseurl(file_meta)
 
         description_text = GalUp._first_text(
-            file_meta, ('description', 'content', 'caption', 'text')) or ''
+            file_meta, ('description', 'content', 'caption', 'text',
+                        'desc')) or ''
         # archive.org does not display raw newlines
         description = re.sub('\r?\n', '<br>', description_text)
 
@@ -552,7 +697,9 @@ class GalUp(object):
             # identifies itself separately from upstream TubeUp.
             scanner='GalUp Image Video Mirroring Application {}'.format(__version__))
 
-        if file_meta.get('file_url'):
-            metadata['source'] = file_meta['file_url']
+        # Link to the uploader's profile, like TubeUp's `channel`
+        channel = GalUp.determine_channel(file_meta, username)
+        if channel:
+            metadata['channel'] = channel
 
         return metadata
