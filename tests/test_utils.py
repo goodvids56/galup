@@ -29,18 +29,40 @@ class UtilsTest(unittest.TestCase):
         self.assertListEqual(expect, clean)
 
     def test_get_itemname(self):
+        tiktok_basename = (
+            '/downloads/tiktok/user/7700361800876920077 Educational! '
+            '#fyp #中国人 #中国  [7686696195469609741]')
         self.assertEqual(
-            get_itemname('twitter', '/downloads/twitter/user/1700_1'),
-            'twitter-1700_1')
+            get_itemname({'category': 'tiktok', 'id': '7700361800876920077'},
+                         tiktok_basename),
+            'tiktok-7700361800876920077')
         self.assertEqual(
-            get_itemname('directlink', 'example.org_media_image'),
+            get_itemname({'category': 'twitter',
+                          'tweet_id': 1700000000000000001,
+                          'author': {'id': 123}},
+                         '/downloads/twitter/user/1700000000000000001_1'),
+            'twitter-1700000000000000001')
+        self.assertEqual(
+            get_itemname({'category': 'instagram', 'post_id': '31',
+                          'media_id': '32'}, 'x'),
+            'instagram-31')
+
+    def test_get_itemname_without_post_id(self):
+        self.assertEqual(
+            get_itemname({'category': 'directlink'},
+                         'example.org_media_image'),
             'directlink-example-org_media_image')
-        self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
-        self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
+        self.assertEqual(
+            get_itemname({'category': 'twitter', 'tweet_id': 0},
+                         'avatar 2023'),
+            'twitter-avatar-2023')
+        self.assertEqual(get_itemname({}, 'image'), 'gallery-dl-image')
+        self.assertEqual(
+            len(get_itemname({'category': 'pixiv'}, 'x' * 200)), 100)
 
     def test_get_itemname_strips_non_ascii(self):
         itemname = get_itemname(
-            'tiktok',
+            {'category': 'tiktok'},
             '/downloads/tiktok/user/7700361800876920077 Educational! '
             '#fyp #中国人 #中国  [7686696195469609741]')
         self.assertEqual(

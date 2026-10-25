@@ -2,6 +2,7 @@ import unittest
 import os
 import shutil
 import json
+import re
 import time
 import requests_mock
 import glob
@@ -20,7 +21,7 @@ SCANNER = 'GalUp Image Video Mirroring Application {}'.format(__version__)
 
 TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
 TWEET_BASENAME = 'twitter_1700000000000000001_1'
-TWEET_ITEMNAME = 'twitter-twitter_1700000000000000001_1'
+TWEET_ITEMNAME = 'twitter-1700000000000000001'
 
 TWEET_METADATA = {
     'mediatype': 'image',
@@ -418,6 +419,64 @@ class GalUpTests(unittest.TestCase):
             result = list(tu.archive_urls([TWEET_URL]))
 
         self.assertEqual([(TWEET_ITEMNAME, TWEET_METADATA)], result)
+
+    def test_archive_urls_groups_files_of_a_post(self):
+        tu = GalUp(dir_path=os.path.join(current_path,
+                                         'test_galup_rootdir'),
+                   ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+
+        # A TikTok slideshow: two images and the background music, all
+        # belonging to post 7700361800876920077
+        title = 'Educational video! #fyp #中国人'
+        files = {
+            '7700361800876920077 %s [7686696195469609741]' % title: 'mp3',
+            '7700361800876920077_01 %s [a361480546174f43]' % title: 'jpg',
+            '7700361800876920077_02 %s [e9b6b741d26948b5]' % title: 'jpg',
+        }
+        os.makedirs(downloads_path('tiktok'), exist_ok=True)
+        basenames = set()
+        for name, extension in files.items():
+            basename = downloads_path('tiktok', name)
+            basenames.add(basename)
+            with open('%s.%s' % (basename, extension), 'wb') as f:
+                f.write(b'data')
+            GalUp.write_info_json(
+                basename,
+                {'category': 'tiktok', 'id': '7700361800876920077',
+                 'title': title, 'extension': extension},
+                'https://www.tiktok.com/@user/photo/7700361800876920077')
+
+        itemname = 'tiktok-7700361800876920077'
+        try:
+            with requests_mock.Mocker() as m, \
+                    patch.object(GalUp, 'get_resource_basenames',
+                                 return_value=basenames):
+                m.get('https://s3.us.archive.org',
+                      content=b'{"over_limit": 0}',
+                      headers={'content-type': 'application/json'})
+                m.get('https://archive.org/metadata/%s' % itemname,
+                      content=b'{}',
+                      headers={'content-type': 'application/json'})
+                m.put(re.compile(r'https://s3\.us\.archive\.org/%s/'
+                                 % itemname),
+                      content=b'',
+                      headers={'content-type': 'text/plain'})
+
+                result = list(tu.archive_urls(['https://www.tiktok.com/']))
+
+                uploaded = sorted(
+                    os.path.basename(request.path)
+                    for request in m.request_history
+                    if request.method == 'PUT')
+        finally:
+            shutil.rmtree(downloads_path('tiktok'), ignore_errors=True)
+
+        self.assertEqual(len(result), 1)
+        identifier, meta = result[0]
+        self.assertEqual(identifier, itemname)
+        # The images decide the mediatype, not the background music
+        self.assertEqual(meta['mediatype'], 'image')
+        self.assertEqual(len(uploaded), 6)
 
 
 class GalleryJobTests(unittest.TestCase):

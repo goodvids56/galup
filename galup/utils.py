@@ -30,17 +30,40 @@ def sanitize_identifier(identifier, replacement='-'):
     return re.sub(r'[^A-Za-z0-9_-]', replacement, identifier)
 
 
-def get_itemname(category, basename):
+# gallery-dl metadata keys holding the ID of the post a file belongs to, in
+# order of preference. Extractors name it differently (e.g. Twitter uses
+# `tweet_id`, TikTok and Pixiv use `id`).
+POST_ID_KEYS = ('tweet_id', 'post_id', 'id')
+
+
+def get_post_id(file_meta):
     """
-    Build an archive.org identifier from a gallery-dl extractor category and
-    the basename of the downloaded file.
+    Return the ID of the post a file belongs to, or None if the gallery-dl
+    metadata doesn't contain one.
     """
+    for key in POST_ID_KEYS:
+        value = file_meta.get(key)
+        if isinstance(value, bool) or not isinstance(value, (str, int)):
+            continue
+        # Some extractors use 0 for "no post", e.g. Twitter avatars
+        value = str(value).strip()
+        if value and value != '0':
+            return value
+    return None
+
+
+def get_itemname(file_meta, basename):
+    """
+    Build an archive.org identifier, `{platform}-{id}`, from the gallery-dl
+    metadata of a file. All files of the same post share one identifier.
+    Falls back to the basename of the downloaded file when the metadata has
+    no post ID.
+    """
+    category = file_meta.get('category') or 'gallery-dl'
+    post_id = get_post_id(file_meta) or os.path.basename(basename)
     # Remove illegal characters in identifier; archive.org identifiers are
     # limited to 100 characters
-    return sanitize_identifier('%s-%s' % (
-        category or 'gallery-dl',
-        os.path.basename(basename),
-    ))[:100]
+    return sanitize_identifier('%s-%s' % (category, post_id))[:100]
 
 
 def check_is_file_empty(filepath):

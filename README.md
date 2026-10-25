@@ -14,7 +14,7 @@ galup - a gallery-dl to Archive.org uploader
 
 The original Tubeup was designed by the [Bibliotheca Anonoma](https://github.com/bibanon/bibanon/wiki) to archive videos to the Internet Archive. This fork applies the same approach to everything gallery-dl can download: single posts, galleries, user profiles and so on.
 
-Each downloaded file gets its own Archive.org item, together with an `.info.json` file containing the metadata gallery-dl collected for it. Images go to the [Community Images](https://archive.org/details/opensource_image) collection, videos to [Community Video](https://archive.org/details/opensource_movies) and audio to [Community Audio](https://archive.org/details/opensource_audio), unless you choose another collection with `--metadata`.
+Each post gets its own Archive.org item, identified as `{platform}-{id}` (for example `tiktok-7700361800876920077` or `twitter-1700000000000000001`), just like TubeUp. All files of the post (e.g. every image of a gallery or slideshow) go into that item, each together with an `.info.json` file containing the metadata gallery-dl collected for it. When gallery-dl doesn't report a post ID, the identifier falls back to `{platform}-{filename}`. Images go to the [Community Images](https://archive.org/details/opensource_image) collection, videos to [Community Video](https://archive.org/details/opensource_movies) and audio to [Community Audio](https://archive.org/details/opensource_audio), unless you choose another collection with `--metadata`.
 
 ## Prerequisites
 
@@ -77,7 +77,7 @@ You will be prompted for your login credentials for the Internet Archive account
 Sites that need a login can use `--username`/`--password` or `--cookies`. Your regular [gallery-dl configuration file](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/configuration.rst) is loaded as well, so site credentials and options set there are used too.
 
 
-6. Each archived file gets its own Archive.org item. Check out what you've uploaded at
+6. Each archived post gets its own Archive.org item. Check out what you've uploaded at
 
    `http://archive.org/details/@YOURUSERNAME`.
 
@@ -168,7 +168,7 @@ Archive.org users can upload to these open collections:
 Note that care should be taken when uploading entire accounts or galleries.
 Read the appropriate section [in this guide](https://archive.org/about/faqs.php#Collections) for creating collections, and contact the [collections staff](mailto:collections-service@archive.org) if you're uploading an account or multiple accounts on one subject (art or photography for example). Internet Archive collections staff will either create a collection for you or merge any uploaded items based on the uploader name that are already up into a new collection.
 
-**Dumping entire accounts into the community collections is abusive and may get your account locked.** Since this fork creates one item per file, a single gallery can produce many items. _Talk to the Internet Archive admins first before doing large uploads; it's better to ask for guidence or help first than run afoul of the rules._
+**Dumping entire accounts into the community collections is abusive and may get your account locked.** Since this fork creates one item per post, a single account can produce many items. _Talk to the Internet Archive admins first before doing large uploads; it's better to ask for guidence or help first than run afoul of the rules._
 
 **If you do not own a collection you will need to be added as an admin for that collection if you want to upload to it.** Talk to the collection owner or staff if you need assistance with this.
 

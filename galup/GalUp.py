@@ -194,7 +194,7 @@ class GalUp(object):
             downloaded_files_basename.add(basename)
 
         def check_if_ia_item_exists(kwdict, basename):
-            itemname = get_itemname(kwdict.get('category'), basename)
+            itemname = get_itemname(kwdict, basename)
             item = internetarchive.get_item(itemname)
             if item.exists:
                 if self.verbose:
@@ -318,34 +318,71 @@ class GalUp(object):
             for key, value in options.items():
                 gdl_config.set((section,), key, value)
 
-    def upload_ia(self, basename, custom_meta=None):
+    @staticmethod
+    def load_info_json(basename):
         """
-        Upload a downloaded file to archive.org.
+        Load the gallery-dl metadata written by `write_info_json`.
 
-        :param basename:     Path of the downloaded file without its extension.
+        :param basename:  Path of the downloaded file without its extension.
+        :return:          A dict containing the gallery-dl metadata.
+        """
+        with open(basename + '.info.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+
+    def upload_ia(self, basenames, custom_meta=None):
+        """
+        Upload downloaded files to a single archive.org item.
+
+        :param basenames:    Path of a downloaded file without its extension,
+                             or a list of them when a post has several
+                             files. They are all uploaded to the same item.
         :param custom_meta:  A custom meta, will be used by internetarchive
                              library when uploading to archive.org.
         :return:             A tuple containing item name and metadata used
                              when uploading to archive.org.
         """
-        json_metadata_filepath = basename + '.info.json'
-        with open(json_metadata_filepath, 'r', encoding='utf-8') as f:
-            file_meta = json.load(f)
+        if isinstance(basenames, str):
+            basenames = [basenames]
+        basenames = sorted(basenames)
 
-        # Exit if download did not complete, don't upload .part files to IA
-        pattern = glob.escape(basename)
-        if glob.glob(pattern + '.*.part') or glob.glob(pattern + '.part'):
-            msg = ('Download incomplete, please re-run or delete the .part '
-                   'files in downloads folder, exiting...')
-            raise Exception(msg)
+        files_meta = {}
+        for basename in basenames:
+            files_meta[basename] = self.load_info_json(basename)
 
-        itemname = get_itemname(file_meta.get('category'), basename)
+            # Exit if download did not complete, don't upload .part files
+            # to IA
+            pattern = glob.escape(basename)
+            if glob.glob(pattern + '.*.part') or glob.glob(pattern + '.part'):
+                msg = ('Download incomplete, please re-run or delete the '
+                       '.part files in downloads folder, exiting...')
+                raise Exception(msg)
+
+        # Build the item metadata from its main file: a video if there is
+        # one, otherwise an image, e.g. the slides of a TikTok slideshow
+        # rather than its background music.
+        def file_priority(basename):
+            extension = str(files_meta[basename].get('extension') or '')
+            extension = extension.lower()
+            if extension in VIDEO_EXTENSIONS:
+                return 0
+            if extension in AUDIO_EXTENSIONS:
+                return 2
+            return 1
+
+        main_basename = min(basenames, key=file_priority)
+        file_meta = files_meta[main_basename]
+
+        itemname = get_itemname(file_meta, main_basename)
         metadata = self.create_archive_org_metadata_from_gallerydl_meta(
-            file_meta, os.path.basename(basename))
+            file_meta, os.path.basename(main_basename))
 
-        # Upload all files with this basename: e.g. image.jpg and
+        # Upload all files with these basenames: e.g. image.jpg and
         # image.info.json
-        files_to_upload = glob.glob(pattern + '.*')
+        files_to_upload = []
+        for basename in basenames:
+            for filepath in sorted(glob.glob(glob.escape(basename) + '.*')):
+                if filepath not in files_to_upload:
+                    files_to_upload.append(filepath)
 
         # Upload the item to the Internet Archive
         item = internetarchive.get_item(itemname)
@@ -403,8 +440,15 @@ class GalUp(object):
         downloaded_file_basenames = self.get_resource_basenames(
             urls, cookie_file, proxy, gdl_username, gdl_password,
             use_download_archive, ignore_existing_item)
+        # Group the files by item, so all files of a post are uploaded
+        # together
+        items = collections.defaultdict(list)
         for basename in sorted(downloaded_file_basenames):
-            identifier, meta = self.upload_ia(basename, custom_meta)
+            file_meta = self.load_info_json(basename)
+            items[get_itemname(file_meta, basename)].append(basename)
+
+        for basenames in items.values():
+            identifier, meta = self.upload_ia(basenames, custom_meta)
             yield identifier, meta
 
     @staticmethod
