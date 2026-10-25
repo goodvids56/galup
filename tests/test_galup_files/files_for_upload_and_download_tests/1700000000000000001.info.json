@@ -33,12 +33,17 @@
     "count": 1,
     "category": "twitter",
     "subcategory": "tweet",
-    "num": 1,
     "type": "photo",
-    "width": 1200,
-    "height": 800,
-    "filename": "F5aBcDeXYZ",
-    "extension": "jpg",
-    "file_url": "https://pbs.twimg.com/media/F5aBcDeXYZ?format=jpg&name=orig",
-    "webpage_url": "https://x.com/example_artist/status/1700000000000000001"
+    "webpage_url": "https://x.com/example_artist/status/1700000000000000001",
+    "downloaded_files": [
+        {
+            "downloaded_file": "1700000000000000001.jpg",
+            "num": 1,
+            "width": 1200,
+            "height": 800,
+            "filename": "F5aBcDeXYZ",
+            "extension": "jpg",
+            "file_url": "https://pbs.twimg.com/media/F5aBcDeXYZ?format=jpg&name=orig"
+        }
+    ]
 }

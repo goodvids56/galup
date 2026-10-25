@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 
 from galup.GalUp import GalUp, GalleryJob, DOWNLOAD_DIR_NAME
+from galup.utils import get_filename
 from galup import __version__
 from unittest.mock import patch
 
@@ -20,7 +21,9 @@ current_path = os.path.dirname(os.path.realpath(__file__))
 SCANNER = 'GalUp Image Video Mirroring Application {}'.format(__version__)
 
 TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
-TWEET_BASENAME = 'twitter_1700000000000000001_1'
+# gallery-dl metadata of the tweet's image
+TWEET_GDL_META = 'twitter_1700000000000000001_1.info.json'
+TWEET_BASENAME = '1700000000000000001'
 TWEET_ITEMNAME = 'twitter-1700000000000000001'
 
 TWEET_METADATA = {
@@ -44,7 +47,7 @@ def get_testfile_path(name):
 
 
 def load_tweet_meta():
-    with open(get_testfile_path('%s.info.json' % TWEET_BASENAME)) as f:
+    with open(get_testfile_path(TWEET_GDL_META)) as f:
         return json.load(f)
 
 
@@ -221,21 +224,36 @@ class GalUpTests(unittest.TestCase):
         basename = downloads_path('write_info_json_test')
         os.makedirs(os.path.dirname(basename), exist_ok=True)
 
-        json_path = GalUp.write_info_json(
-            basename,
-            {'category': 'twitter', 'id': 1, '_private': object(),
-             'date': datetime(2023, 9, 8, 12, 34, 56)},
-            TWEET_URL)
+        post = {'category': 'tiktok', 'id': '1', 'title': 'Slides',
+                'date': datetime(2023, 9, 8, 12, 34, 56),
+                'webpage_url': TWEET_URL}
+        json_path = GalUp.write_info_json(basename, {
+            basename + '_1.jpg': dict(post, num=1, extension='jpg',
+                                      image={'imageWidth': 10}),
+            basename + '_2.jpg': dict(post, num=2, extension='jpg',
+                                      image={'imageWidth': 20}),
+        })
 
         with open(json_path) as f:
             result = json.load(f)
+        files = GalUp.load_info_json(basename)
         os.remove(json_path)
 
         self.assertEqual(json_path, basename + '.info.json')
-        self.assertNotIn('_private', result)
-        self.assertEqual(result['category'], 'twitter')
-        self.assertEqual(result['webpage_url'], TWEET_URL)
-        self.assertEqual(result['date'], '2023-09-08 12:34:56')
+        self.assertEqual(result, {
+            'category': 'tiktok', 'id': '1', 'title': 'Slides',
+            'date': '2023-09-08 12:34:56', 'webpage_url': TWEET_URL,
+            'downloaded_files': [
+                {'downloaded_file': 'write_info_json_test_1.jpg', 'num': 1,
+                 'extension': 'jpg', 'image': {'imageWidth': 10}},
+                {'downloaded_file': 'write_info_json_test_2.jpg', 'num': 2,
+                 'extension': 'jpg', 'image': {'imageWidth': 20}},
+            ]})
+        self.assertEqual(files[1], (
+            basename + '_2.jpg',
+            {'category': 'tiktok', 'id': '1', 'title': 'Slides',
+             'date': '2023-09-08 12:34:56', 'webpage_url': TWEET_URL,
+             'num': 2, 'extension': 'jpg', 'image': {'imageWidth': 20}}))
 
     def test_create_archive_org_metadata_from_gallerydl_meta(self):
         result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
@@ -508,33 +526,31 @@ class GalUpTests(unittest.TestCase):
         tu = GalUp(dir_path=os.path.join(current_path,
                                          'test_galup_rootdir'),
                    ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+        page_url = 'https://www.tiktok.com/@user/photo/7700361800876920077'
+        post_dir = downloads_path('tiktok', 'user')
 
-        # A TikTok slideshow: two images and the background music, all
-        # belonging to post 7700361800876920077
-        title = 'Educational video! #fyp #中国人'
-        files = {
-            '7700361800876920077 %s [7686696195469609741]' % title: 'mp3',
-            '7700361800876920077_01 %s [a361480546174f43]' % title: 'jpg',
-            '7700361800876920077_02 %s [e9b6b741d26948b5]' % title: 'jpg',
-        }
-        os.makedirs(downloads_path('tiktok'), exist_ok=True)
-        basenames = set()
-        for name, extension in files.items():
-            basename = downloads_path('tiktok', name)
-            basenames.add(basename)
-            with open('%s.%s' % (basename, extension), 'wb') as f:
-                f.write(b'data')
-            GalUp.write_info_json(
-                basename,
-                {'category': 'tiktok', 'id': '7700361800876920077',
-                 'title': title, 'extension': extension},
-                'https://www.tiktok.com/@user/photo/7700361800876920077')
+        # A TikTok slideshow: two images and the background music
+        class SlideshowJob(object):
+            def __init__(self, url, on_file=None, should_skip=None):
+                self.on_file = on_file
+
+            def run(self):
+                os.makedirs(post_dir, exist_ok=True)
+                post = {'category': 'tiktok', 'id': '7700361800876920077',
+                        'title': 'Educational video! #fyp #中国人'}
+                for num, extension in ((1, 'jpg'), (2, 'jpg'), (0, 'mp3')):
+                    kwdict = dict(post, num=num, extension=extension)
+                    filepath = os.path.join(post_dir, '%s.%s' % (
+                        get_filename(kwdict), extension))
+                    with open(filepath, 'wb') as f:
+                        f.write(b'data')
+                    self.on_file(filepath, kwdict, page_url)
 
         itemname = 'tiktok-7700361800876920077'
         try:
             with requests_mock.Mocker() as m, \
-                    patch.object(GalUp, 'get_resource_basenames',
-                                 return_value=basenames):
+                    patch('galup.GalUp.GalleryJob', SlideshowJob), \
+                    patch.object(GalUp, 'apply_gdl_options'):
                 m.get('https://s3.us.archive.org',
                       content=b'{"over_limit": 0}',
                       headers={'content-type': 'application/json'})
@@ -546,7 +562,8 @@ class GalUpTests(unittest.TestCase):
                       content=b'',
                       headers={'content-type': 'text/plain'})
 
-                result = list(tu.archive_urls(['https://www.tiktok.com/']))
+                result = list(tu.archive_urls([page_url],
+                                              ignore_existing_item=True))
 
                 uploaded = sorted(
                     os.path.basename(request.path)
@@ -560,7 +577,9 @@ class GalUpTests(unittest.TestCase):
         self.assertEqual(identifier, itemname)
         # The images decide the mediatype, not the background music
         self.assertEqual(meta['mediatype'], 'image')
-        self.assertEqual(len(uploaded), 6)
+        self.assertEqual(uploaded, [
+            '7700361800876920077.info.json', '7700361800876920077.mp3',
+            '7700361800876920077_1.jpg', '7700361800876920077_2.jpg'])
 
 
 class GalleryJobTests(unittest.TestCase):

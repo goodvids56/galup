@@ -1,6 +1,5 @@
 import os
 import re
-import glob
 import time
 import json
 import logging
@@ -12,7 +11,7 @@ from datetime import datetime
 from gallery_dl import config as gdl_config
 from gallery_dl import exception as gdl_exception
 from gallery_dl.job import DownloadJob
-from .utils import get_itemname, get_filename
+from .utils import get_itemname, get_filename, get_post_id
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -24,6 +23,10 @@ DOWNLOAD_DIR_NAME = 'downloads'
 VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
                     'ts', 'mpg', 'mpeg', '3gp'}
 AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
+
+# gallery-dl metadata keys describing a single file, listed per file in the
+# post's .info.json
+FILE_KEYS = ('num', 'filename', 'extension', 'file_url', 'width', 'height')
 
 # Profile URLs of uploaders by gallery-dl category, used for the `channel`
 # metadata
@@ -186,7 +189,8 @@ class GalUp(object):
                                use_download_archive=False,
                                ignore_existing_item=False):
         """
-        Download urls with gallery-dl and get the basenames of the files.
+        Download urls with gallery-dl, write one `.info.json` per post and get
+        the basenames of these `.info.json` files.
 
         :param urls:                  A list of urls that will be downloaded with
                                       gallery-dl.
@@ -200,14 +204,25 @@ class GalUp(object):
                                       This will download only files not listed in
                                       the archive file.
         :param ignore_existing_item:  Ignores the check for existing items on archive.org.
-        :return:                      Set of file basenames that have been downloaded.
+        :return:                      Set of the posts that have been downloaded,
+                                      as paths of their `.info.json` file without
+                                      the `.info.json` extension.
         """
-        downloaded_files_basename = set()
+        # Downloaded files by post: {post basename: {filepath: metadata}}
+        posts = collections.defaultdict(dict)
 
         def on_file(filepath, kwdict, page_url):
-            basename = os.path.splitext(filepath)[0]
-            self.write_info_json(basename, kwdict, page_url)
-            downloaded_files_basename.add(basename)
+            # Copy the metadata, gallery-dl reuses the dict for the next file
+            meta = {key: value for key, value in kwdict.items()
+                    if not key.startswith('_')}
+            meta['webpage_url'] = page_url
+            post_id = get_post_id(meta)
+            if post_id is None:
+                post_basename = os.path.splitext(filepath)[0]
+            else:
+                post_basename = os.path.join(os.path.dirname(filepath),
+                                             post_id.replace(os.sep, '_'))
+            posts[post_basename][filepath] = meta
 
         def check_if_ia_item_exists(kwdict, basename):
             itemname = get_itemname(kwdict, basename)
@@ -236,28 +251,49 @@ class GalUp(object):
                 continue
             job.run()
 
-        self.logger.debug(
-            'Basenames obtained from urls (%s): %s'
-            % (urls, downloaded_files_basename))
+        for post_basename, files in posts.items():
+            self.write_info_json(post_basename, files)
 
-        return downloaded_files_basename
+        self.logger.debug(
+            'Basenames obtained from urls (%s): %s' % (urls, set(posts)))
+
+        return set(posts)
 
     @staticmethod
-    def write_info_json(basename, kwdict, page_url):
+    def write_info_json(basename, files):
         """
-        Write the gallery-dl metadata of a file to `<basename>.info.json`.
+        Write the gallery-dl metadata of a post to `<basename>.info.json`.
 
-        :param basename:  Path of the downloaded file without its extension.
-        :param kwdict:    gallery-dl metadata dictionary of the file.
-        :param page_url:  URL of the page the file was extracted from.
+        The metadata shared by all files of the post is written once, the
+        rest is listed per file under `downloaded_files`, e.g.
+        `{"id": ..., "title": ..., "downloaded_files": [{"downloaded_file":
+        "123_1.jpg", "num": 1, ...}, ...]}`.
+
+        :param basename:  Path of the post's `.info.json` without extension.
+        :param files:     A dict of {path of a downloaded file: its gallery-dl
+                          metadata}.
         :return:          Path of the written json file.
         """
-        meta = {key: value for key, value in kwdict.items()
-                if not key.startswith('_')}
-        meta['webpage_url'] = page_url
+        metas = [json.loads(json.dumps(meta, default=str))
+                 for meta in files.values()]
+        common = {key: value for key, value in metas[0].items()
+                  if all(key in meta and meta[key] == value
+                         for meta in metas[1:])}
+        # Always list these per file, even for posts with a single file
+        for key in FILE_KEYS:
+            common.pop(key, None)
+
+        info = dict(common)
+        info['downloaded_files'] = []
+        for filepath, meta in zip(files, metas):
+            entry = {'downloaded_file': os.path.basename(filepath)}
+            entry.update({key: value for key, value in meta.items()
+                          if key not in common})
+            info['downloaded_files'].append(entry)
+
         json_path = basename + '.info.json'
         with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(meta, f, ensure_ascii=False, indent=4, default=str)
+            json.dump(info, f, ensure_ascii=False, indent=4)
         return json_path
 
     def generate_gdl_options(self,
@@ -339,68 +375,68 @@ class GalUp(object):
     @staticmethod
     def load_info_json(basename):
         """
-        Load the gallery-dl metadata written by `write_info_json`.
+        Load the gallery-dl metadata of a post written by `write_info_json`.
 
-        :param basename:  Path of the downloaded file without its extension.
-        :return:          A dict containing the gallery-dl metadata.
+        :param basename:  Path of the post's `.info.json` without extension.
+        :return:          A list of tuples of (path of a downloaded file, its
+                          gallery-dl metadata).
         """
         with open(basename + '.info.json', 'r', encoding='utf-8') as f:
-            return json.load(f)
+            info = json.load(f)
 
-    def upload_ia(self, basenames, custom_meta=None):
+        directory = os.path.dirname(basename)
+        files = []
+        for entry in info.pop('downloaded_files'):
+            meta = dict(info)
+            meta.update(entry)
+            filepath = os.path.join(directory, meta.pop('downloaded_file'))
+            files.append((filepath, meta))
+        return files
+
+    def upload_ia(self, basename, custom_meta=None):
         """
-        Upload downloaded files to a single archive.org item.
+        Upload the downloaded files of a post to a single archive.org item.
 
-        :param basenames:    Path of a downloaded file without its extension,
-                             or a list of them when a post has several
-                             files. They are all uploaded to the same item.
+        :param basename:     Path of the post's `.info.json` file without its
+                             `.info.json` extension.
         :param custom_meta:  A custom meta, will be used by internetarchive
                              library when uploading to archive.org.
         :return:             A tuple containing item name and metadata used
                              when uploading to archive.org.
         """
-        if isinstance(basenames, str):
-            basenames = [basenames]
-        basenames = sorted(basenames)
+        files = self.load_info_json(basename)
 
-        files_meta = {}
-        for basename in basenames:
-            files_meta[basename] = self.load_info_json(basename)
-
+        for filepath, _ in files:
             # Exit if download did not complete, don't upload .part files
             # to IA
-            pattern = glob.escape(basename)
-            if glob.glob(pattern + '.*.part') or glob.glob(pattern + '.part'):
+            if os.path.exists(filepath + '.part'):
                 msg = ('Download incomplete, please re-run or delete the '
                        '.part files in downloads folder, exiting...')
                 raise Exception(msg)
+            if not os.path.isfile(filepath):
+                raise Exception('Downloaded file "%s" is missing, please '
+                                're-run, exiting...' % filepath)
 
         # Build the item metadata from its main file: a video if there is
         # one, otherwise an image, e.g. the slides of a TikTok slideshow
         # rather than its background music.
-        def file_priority(basename):
-            extension = str(files_meta[basename].get('extension') or '')
-            extension = extension.lower()
+        def file_priority(file):
+            extension = str(file[1].get('extension') or '').lower()
             if extension in VIDEO_EXTENSIONS:
                 return 0
             if extension in AUDIO_EXTENSIONS:
                 return 2
             return 1
 
-        main_basename = min(basenames, key=file_priority)
-        file_meta = files_meta[main_basename]
+        file_meta = min(files, key=file_priority)[1]
 
-        itemname = get_itemname(file_meta, main_basename)
+        itemname = get_itemname(file_meta, basename)
         metadata = self.create_archive_org_metadata_from_gallerydl_meta(
-            file_meta, os.path.basename(main_basename))
+            file_meta, os.path.basename(basename))
 
-        # Upload all files with these basenames: e.g. image.jpg and
-        # image.info.json
-        files_to_upload = []
-        for basename in basenames:
-            for filepath in sorted(glob.glob(glob.escape(basename) + '.*')):
-                if filepath not in files_to_upload:
-                    files_to_upload.append(filepath)
+        # Upload all files of the post and its .info.json
+        files_to_upload = [filepath for filepath, _ in files]
+        files_to_upload.append(basename + '.info.json')
 
         # Upload the item to the Internet Archive
         item = internetarchive.get_item(itemname)
@@ -455,18 +491,11 @@ class GalUp(object):
         :return:                      Tuple containing identifier and metadata of the
                                       file that has been uploaded to archive.org.
         """
-        downloaded_file_basenames = self.get_resource_basenames(
+        post_basenames = self.get_resource_basenames(
             urls, cookie_file, proxy, gdl_username, gdl_password,
             use_download_archive, ignore_existing_item)
-        # Group the files by item, so all files of a post are uploaded
-        # together
-        items = collections.defaultdict(list)
-        for basename in sorted(downloaded_file_basenames):
-            file_meta = self.load_info_json(basename)
-            items[get_itemname(file_meta, basename)].append(basename)
-
-        for basenames in items.values():
-            identifier, meta = self.upload_ia(basenames, custom_meta)
+        for basename in sorted(post_basenames):
+            identifier, meta = self.upload_ia(basename, custom_meta)
             yield identifier, meta
 
     @staticmethod
