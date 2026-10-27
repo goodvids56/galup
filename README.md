@@ -28,8 +28,6 @@ Recommended system specifications:
 
 Installation via third-party package managers like Homebrew, MacPorts, or Linux system packages (apt, yum, etc.) *is not supported.*
 
-galup is not published on PyPI, so install it from its git repository as shown below. (`pipx install tubeup` installs upstream Tubeup, which is a different program.)
-
 
 1. Install `pipx` (typically `python3-pipx` or in Arch `python-pipx`), `git` and, optionally, `ffmpeg` (gallery-dl uses it for some formats, such as Pixiv ugoira animations).
    To install ffmpeg in Ubuntu, enable the Universe repository.

@@ -668,7 +668,9 @@ class GalUp(object):
 
         # load up tags into an IA compatible semicolon-separated string
         # example: Twitter;image;
-        tags_string = '%s;%s;' % (platform, mediatype)
+        # archive.org's 'movies' mediatype is tagged as 'video'
+        media_tag = 'video' if mediatype == 'movies' else mediatype
+        tags_string = '%s;%s;' % (platform, media_tag)
 
         tags = []
         for key in ('tags', 'hashtags', 'categories', 'challenges',

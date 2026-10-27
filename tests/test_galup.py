@@ -381,6 +381,16 @@ class GalUpTests(unittest.TestCase):
         self.assertEqual(result['subject'], 'TikTok;image;fyp;china;中国人;')
         self.assertEqual(result['creator'], 'blossom_lovecn')
 
+    def test_create_archive_org_metadata_from_gallerydl_meta_video_tag(self):
+        vid_meta = load_tweet_meta()
+        vid_meta['extension'] = 'mp4'
+
+        result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
+            vid_meta, TWEET_BASENAME)
+
+        self.assertEqual(result['mediatype'], 'movies')
+        self.assertTrue(result['subject'].startswith('Twitter;video;'))
+
     def test_create_archive_org_metadata_from_gallerydl_meta_mass_of_tags(self):
         vid_meta = load_tweet_meta()
         vid_meta['tags'] = [f't{i}' for i in range(0, 300)]
