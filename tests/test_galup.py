@@ -31,7 +31,7 @@ TWEET_METADATA = {
     'mediatype': 'image',
     'creator': 'example_artist',
     'collection': 'opensource_image',
-    'title': 'Twitter %s' % TWEET_BASENAME,
+    'title': 'Twitter #%s' % TWEET_BASENAME,
     'description': ('Mountain sketch, finished today<br>'
                     'Thanks for looking! #art #mountains'),
     'date': '2023-09-08',

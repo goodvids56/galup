@@ -642,7 +642,7 @@ class GalUp(object):
         mediatype, collection = GalUp.determine_media_type(file_meta, pageurl)
 
         title = GalUp._first_text(file_meta, ('title', 'post_title')) or \
-            '%s %s' % (platform, basename)
+            '%s #%s' % (platform, basename)
 
         # Use the uploader's username rather than their display name, as it
         # is stable and unique. Extractors store it differently, e.g.
