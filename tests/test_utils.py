@@ -2,7 +2,8 @@ import unittest
 import os
 from galup.utils import (sanitize_identifier, check_is_file_empty,
                          get_itemname, get_filename, get_post_name,
-                         get_platform_name, get_thumbnail_url)
+                         get_platform_name, get_thumbnail_url,
+                         get_subtitle_extension)
 
 
 class UtilsTest(unittest.TestCase):
@@ -98,6 +99,14 @@ class UtilsTest(unittest.TestCase):
             (dict(tiktok, num=0), '7700361800876920077'),
             # TikTok video
             (tiktok, '7700361800876920077'),
+            # and its subtitles
+            (dict(tiktok, num=0, type='subtitle',
+                  subtitle_lang_codename='eng-US'),
+             '7700361800876920077.eng-US'),
+            (dict(tiktok, type='subtitle', language='fra-FR'),
+             '7700361800876920077.fra-FR'),
+            # Twitter's `lang` of a tweet isn't the language of a subtitle
+            ({'tweet_id': 17, 'num': 1, 'count': 1, 'lang': 'en'}, '17'),
             # Tweets with one and with several images
             ({'tweet_id': 17, 'num': 1, 'count': 1}, '17'),
             ({'tweet_id': 17, 'num': 3, 'count': 4}, '17_3'),
@@ -112,6 +121,17 @@ class UtilsTest(unittest.TestCase):
         ]
         self.assertEqual([get_filename(meta) for meta, _ in cases],
                          [name for _, name in cases])
+
+    def test_get_subtitle_extension(self):
+        cases = [
+            ({'subtitle_format': 'webvtt'}, 'vtt'),
+            ({'subtitle_format': 'creator_caption'}, 'json'),
+            ({'subtitle_format': 'SRT'}, 'srt'),
+            ({'subtitle_format': ''}, None),
+            ({}, None),
+        ]
+        self.assertEqual([get_subtitle_extension(meta) for meta, _ in cases],
+                         [extension for _, extension in cases])
 
     def test_get_thumbnail_url(self):
         cases = [

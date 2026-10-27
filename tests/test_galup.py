@@ -12,7 +12,7 @@ import logging
 
 from galup.GalUp import (GalUp, GalleryJob, DOWNLOAD_DIR_NAME,
                          get_repository, get_gdl_repository)
-from galup.utils import get_filename
+from galup.utils import get_filename, get_subtitle_extension
 from galup import __version__
 from unittest.mock import patch
 from gallery_dl import extractor as gdl_extractor, text
@@ -185,7 +185,8 @@ class GalUpTests(unittest.TestCase):
                     'name': 'metadata',
                     'event': 'post',
                     'filename': '{_galup_post}.info.json'}],
-                'tiktok': {'user': {'include': 'posts'}}},
+                'tiktok': {'user': {'include': 'posts'},
+                           'subtitles': 'LC'}},
             'downloader': {
                 'part': True,
                 'retries': 9001},
@@ -322,6 +323,66 @@ class GalUpTests(unittest.TestCase):
             for meta in metas]
 
         self.assertEqual(result, expected)
+
+    def test_determine_post_url(self):
+        cases = [
+            # TikTok videos and slideshows of a profile
+            ({'category': 'tiktok', 'id': '7695923970339654942',
+              'user': 'untreatedloser', 'post_type': 'video'},
+             'https://www.tiktok.com/@untreatedloser/video/'
+             '7695923970339654942'),
+            ({'category': 'tiktok', 'id': '7700361800876920077',
+              'user': 'user', 'post_type': 'image'},
+             'https://www.tiktok.com/@user/photo/7700361800876920077'),
+            ({'category': 'twitter', 'tweet_id': 17,
+              'author': {'name': 'example_artist'}},
+             'https://x.com/example_artist/status/17'),
+            ({'category': 'twitter', 'tweet_id': 17},
+             'https://x.com/i/status/17'),
+            ({'category': 'reddit', 'permalink': '/r/pics/comments/abc/x/'},
+             'https://www.reddit.com/r/pics/comments/abc/x/'),
+            ({'category': 'bluesky', 'post_id': '3kxyz',
+              'author': {'handle': 'someone.bsky.social'}},
+             'https://bsky.app/profile/someone.bsky.social/post/3kxyz'),
+            ({'category': 'instagram',
+              'post_url': 'https://www.instagram.com/p/C0de/'},
+             'https://www.instagram.com/p/C0de/'),
+            # Unknown
+            ({'category': 'tiktok', 'id': '7695923970339654942', 'user': ''},
+             None),
+            ({'category': 'directlink', 'id': '1'}, None),
+        ]
+        self.assertEqual([GalUp.determine_post_url(meta) for meta, _ in cases],
+                         [url for _, url in cases])
+
+    def test_get_resource_basenames_uses_post_url_of_profile_posts(self):
+        tu = GalUp(dir_path=os.path.join(current_path, 'test_galup_rootdir'))
+        post = {'category': 'tiktok', 'subcategory': 'posts',
+                'id': '7695923970339654942', 'user': 'untreatedloser',
+                'post_type': 'video', 'extension': 'mp4'}
+
+        class ProfileJob(object):
+            def __init__(self, url, on_file=None, should_skip=None):
+                self.url, self.on_file = url, on_file
+
+            def run(self):
+                self.on_file('/video.mp4', post, self.url, '/7695923970339654942')
+
+        with patch('galup.GalUp.GalleryJob', ProfileJob), \
+                patch.object(GalUp, 'apply_gdl_options'):
+            result = tu.get_resource_basenames(
+                ['https://www.tiktok.com/@untreatedloser/posts'],
+                ignore_existing_item=True)
+
+        meta = result['/7695923970339654942']['/video.mp4']
+        self.assertEqual(meta['webpage_url'],
+                         'https://www.tiktok.com/@untreatedloser/video/'
+                         '7695923970339654942')
+        self.assertEqual(
+            tu.create_archive_org_metadata_from_gallerydl_meta(
+                meta, '7695923970339654942')['originalurl'],
+            'https://www.tiktok.com/@untreatedloser/video/'
+            '7695923970339654942')
 
     def test_create_archive_org_metadata_from_gallerydl_meta_no_channel(self):
         result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
@@ -631,6 +692,36 @@ class FakeThumbnailExtractor(Extractor):
 gdl_extractor.add(FakeThumbnailExtractor)
 
 
+class FakeSubtitleExtractor(Extractor):
+    """A gallery-dl extractor for a video with subtitles, like TikTok's"""
+    category = 'galupsubs'
+    subcategory = 'user'
+    directory_fmt = ('{category}', '{user}')
+    pattern = r'galupsubs:user'
+
+    def items(self):
+        post = {'id': '301', 'user': 'someone', 'title': 'Video 301'}
+        yield Message.Directory, '', post
+        url = 'https://example.org/301/video.mp4'
+        file = dict(post, num=0)
+        text.nameext_from_url(url, file)
+        yield Message.Url, url, file
+        for lang, sub_format, url in (
+                ('eng-US', 'webvtt', 'https://example.org/301/eng.vtt'),
+                ('eng-US', 'creator_caption',
+                 'https://example.org/301/eng.json'),
+                # TikTok's subtitle URLs don't have an extension
+                ('fra-FR', 'webvtt', 'https://example.org/301/oFRa?a=1')):
+            file = dict(post, num=0, type='subtitle',
+                        subtitle_lang_codename=lang,
+                        subtitle_format=sub_format, subtitle_source='LC')
+            text.nameext_from_url(url, file)
+            yield Message.Url, url, file
+
+
+gdl_extractor.add(FakeSubtitleExtractor)
+
+
 class GalleryJobTests(unittest.TestCase):
     """Run the real gallery-dl machinery against a mocked direct link."""
 
@@ -646,6 +737,7 @@ class GalleryJobTests(unittest.TestCase):
         shutil.rmtree(downloads_path('directlink'), ignore_errors=True)
         shutil.rmtree(downloads_path('galuptest'), ignore_errors=True)
         shutil.rmtree(downloads_path('galupthumbs'), ignore_errors=True)
+        shutil.rmtree(downloads_path('galupsubs'), ignore_errors=True)
 
     def on_file(self, filepath, kwdict, page_url, post_basename):
         self.reported.append((filepath, kwdict['category'], page_url,
@@ -657,6 +749,79 @@ class GalleryJobTests(unittest.TestCase):
         queued = [url for _, url, _ in extr.items()]
 
         self.assertEqual(queued, ['https://www.tiktok.com/@someone/posts'])
+
+    def test_tiktok_downloads_only_subtitles_made_by_people(self):
+        extr = gdl_extractor.find(
+            'https://www.tiktok.com/@someone/video/7700361800876920077')
+        extr.initialize()
+        post = {'id': '7700361800876920077', 'desc': '', 'video': {
+            'duration': 10,
+            'subtitleInfos': [
+                {'LanguageID': '2', 'LanguageCodeName': lang,
+                 'Format': fmt, 'Version': '1', 'Source': source,
+                 'Url': 'https://example.org/%s/%s' % (source, lang)}
+                for lang, fmt, source in (
+                    ('eng-US', 'webvtt', 'ASR'),
+                    ('fra-FR', 'webvtt', 'MT'),
+                    ('eng-US', 'webvtt', 'LC'),
+                    ('deu-DE', 'creator_caption', 'LC'))]}}
+
+        files = [(url, get_filename(post), get_subtitle_extension(post))
+                 for url in extr._extract_subtitles(post, 'video')]
+
+        self.assertEqual(files, [
+            ('https://example.org/LC/eng-US',
+             '7700361800876920077.eng-US', 'vtt'),
+            ('https://example.org/LC/deu-DE',
+             '7700361800876920077.deu-DE', 'json')])
+
+    def test_downloads_subtitles_of_post(self):
+        with requests_mock.Mocker() as m:
+            m.get(re.compile(r'https://example\.org/.*'), content=b'data')
+            GalleryJob('galupsubs:user', on_file=self.on_file).run()
+
+        user_dir = downloads_path('galupsubs', 'someone')
+        self.assertEqual(sorted(os.listdir(user_dir)), [
+            '301.eng-US.json', '301.eng-US.vtt', '301.fra-FR.vtt',
+            '301.info.json', '301.mp4'])
+        # Subtitles are reported as files of their post
+        self.assertEqual(
+            sorted((os.path.basename(filepath),
+                    os.path.basename(post_basename))
+                   for filepath, _, _, post_basename in self.reported),
+            [('301.eng-US.json', '301'), ('301.eng-US.vtt', '301'),
+             ('301.fra-FR.vtt', '301'), ('301.mp4', '301')])
+
+    def test_archive_urls_uploads_subtitles(self):
+        tu = GalUp(dir_path=os.path.join(current_path, 'test_galup_rootdir'),
+                   ia_config_path=get_testfile_path('ia_config_for_test.ini'))
+        itemname = 'Galupsubs-301'
+
+        # Keep the case of the uploaded files' names in `request.path`
+        with requests_mock.Mocker(case_sensitive=True) as m:
+            m.get(re.compile(r'https://example\.org/.*'), content=b'data')
+            m.get('https://s3.us.archive.org',
+                  content=b'{"over_limit": 0}',
+                  headers={'content-type': 'application/json'})
+            m.get('https://archive.org/metadata/%s' % itemname,
+                  content=b'{}',
+                  headers={'content-type': 'application/json'})
+            m.put(re.compile(r'https://s3\.us\.archive\.org/%s/' % itemname),
+                  content=b'', headers={'content-type': 'text/plain'})
+
+            result = list(tu.archive_urls(['galupsubs:user'],
+                                          ignore_existing_item=True))
+
+            uploaded = sorted(os.path.basename(request.path)
+                              for request in m.request_history
+                              if request.method == 'PUT')
+
+        self.assertEqual([identifier for identifier, _ in result], [itemname])
+        # The video decides the mediatype, not its subtitles
+        self.assertEqual(result[0][1]['mediatype'], 'movies')
+        self.assertEqual(uploaded, [
+            '301.eng-US.json', '301.eng-US.vtt', '301.fra-FR.vtt',
+            '301.info.json', '301.mp4'])
 
     def test_apply_gdl_options_keeps_user_subsection_options(self):
         from gallery_dl import config as gdl_config
@@ -670,6 +835,8 @@ class GalleryJobTests(unittest.TestCase):
         self.assertEqual(
             gdl_config.get(('extractor', 'tiktok', 'user'), 'include'),
             'posts')
+        self.assertEqual(
+            gdl_config.get(('extractor', 'tiktok'), 'subtitles'), 'LC')
 
     def test_reports_downloaded_file(self):
         with requests_mock.Mocker() as m:

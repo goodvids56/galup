@@ -18,7 +18,8 @@ from gallery_dl import version as gdl_version
 from gallery_dl.job import DownloadJob
 from gallery_dl.postprocessor.metadata import MetadataPP
 from .utils import (get_itemname, get_filename, get_post_name,
-                    get_platform_name, get_thumbnail_url)
+                    get_platform_name, get_thumbnail_url,
+                    get_subtitle_extension)
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -214,6 +215,10 @@ class GalleryJob(DownloadJob):
         # Used by the default filename format, see `GalUp.generate_gdl_options`
         kwdict['_galup_filename'] = (get_filename(kwdict) or
                                      kwdict.get('filename') or 'file')
+        # gallery-dl takes the extension of subtitles from their URL, which
+        # often has none; use their format instead, e.g. `vtt` for `webvtt`
+        if kwdict.get('type') == 'subtitle' and not kwdict.get('extension'):
+            kwdict['extension'] = get_subtitle_extension(kwdict) or ''
         if self.post_name is None:
             self.post_name = get_post_name(kwdict)
         if self.should_skip is not None:
@@ -360,7 +365,9 @@ class GalUp(object):
             # Copy the metadata, gallery-dl reuses the dict for the next file
             meta = {key: value for key, value in kwdict.items()
                     if not key.startswith('_')}
-            meta['webpage_url'] = page_url
+            # The URL given to gallery-dl is the profile's for all posts of
+            # a profile, e.g. `https://www.tiktok.com/@user/posts`
+            meta['webpage_url'] = self.determine_post_url(meta) or page_url
             posts[post_basename][filepath] = meta
 
         def check_if_ia_item_exists(kwdict, post_name):
@@ -453,8 +460,12 @@ class GalUp(object):
                                                      '.gallerydlarchive')
 
         # A TikTok profile link downloads the profile picture besides the
-        # posts by default; only archive the posts
-        extractor_opts['tiktok'] = {'user': {'include': 'posts'}}
+        # posts by default; only archive the posts. Download all subtitles
+        # made by people (`LC`, local or creator captions) to
+        # `{id}.{lang}.{ext}`, but not automatic speech recognition (`ASR`)
+        # or machine translations (`MT`).
+        extractor_opts['tiktok'] = {'user': {'include': 'posts'},
+                                    'subtitles': 'LC'}
 
         return {
             'extractor': extractor_opts,
@@ -520,10 +531,11 @@ class GalUp(object):
 
         # Build the item metadata from its main file: a video if there is
         # one, otherwise an image, e.g. the slides of a TikTok slideshow
-        # rather than its background music, but never the thumbnail.
+        # rather than its background music, but never the thumbnail or
+        # subtitles.
         def file_priority(file):
             extension = str(file[1].get('extension') or '').lower()
-            if file[1].get('type') == 'thumbnail':
+            if file[1].get('type') in ('thumbnail', 'subtitle'):
                 return 3
             if extension in VIDEO_EXTENSIONS:
                 return 0
@@ -674,6 +686,47 @@ class GalUp(object):
 
         if username and category in CHANNEL_URLS:
             return CHANNEL_URLS[category].format(username=username)
+        return None
+
+    @staticmethod
+    def determine_post_url(file_meta):
+        """
+        Determine the URL of the post a file belongs to.
+
+        :param file_meta:  gallery-dl metadata of the file.
+        :return:           Post URL, or None if unknown.
+        """
+        post_url = file_meta.get('post_url')
+        if isinstance(post_url, str) and post_url.startswith('http'):
+            return post_url
+
+        category = file_meta.get('category')
+        author = file_meta.get('author')
+        if not isinstance(author, dict):
+            author = {}
+
+        post_id = file_meta.get('id')
+        user = file_meta.get('user')
+        if category == 'tiktok' and post_id and isinstance(user, str) and \
+                user:
+            kind = 'photo' if file_meta.get('post_type') == 'image' \
+                else 'video'
+            return 'https://www.tiktok.com/@%s/%s/%s' % (user, kind, post_id)
+
+        tweet_id = file_meta.get('tweet_id')
+        if category == 'twitter' and tweet_id:
+            return 'https://x.com/%s/status/%s' % (author.get('name') or 'i',
+                                                   tweet_id)
+
+        permalink = file_meta.get('permalink')
+        if category == 'reddit' and isinstance(permalink, str) and \
+                permalink.startswith('/'):
+            return 'https://www.reddit.com' + permalink
+
+        post_id = file_meta.get('post_id')
+        if category == 'bluesky' and post_id and author.get('handle'):
+            return 'https://bsky.app/profile/%s/post/%s' % (author['handle'],
+                                                            post_id)
         return None
 
     @staticmethod
