@@ -12,7 +12,7 @@ from gallery_dl import exception as gdl_exception
 from gallery_dl import text as gdl_text
 from gallery_dl.job import DownloadJob
 from .utils import (get_itemname, get_filename, get_post_name,
-                    get_thumbnail_url)
+                    get_platform_name, get_thumbnail_url)
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -368,6 +368,10 @@ class GalUp(object):
             extractor_opts['archive'] = os.path.join(self.dir_path['root'],
                                                      '.gallerydlarchive')
 
+        # A TikTok profile link downloads the profile picture besides the
+        # posts by default; only archive the posts
+        extractor_opts['tiktok'] = {'user': {'include': 'posts'}}
+
         return {
             'extractor': extractor_opts,
             'downloader': {
@@ -390,12 +394,21 @@ class GalUp(object):
         """
         gdl_config.clear()
         gdl_config.load()
-        for section, options in gdl_opts.items():
+
+        def apply(path, options):
             for key, value in options.items():
+                if isinstance(value, dict):
+                    # Merge into the user's options of that subsection, e.g.
+                    # `extractor.tiktok`, instead of replacing them
+                    apply(path + (key,), value)
+                    continue
                 if key == 'postprocessors':
                     # Keep the user's own post processors
-                    value = list(gdl_config.get((section,), key) or ()) + value
-                gdl_config.set((section,), key, value)
+                    value = list(gdl_config.get(path, key) or ()) + value
+                gdl_config.set(path, key, value)
+
+        for section, options in gdl_opts.items():
+            apply((section,), options)
 
     def upload_ia(self, basename, files, custom_meta=None):
         """
@@ -623,13 +636,13 @@ class GalUp(object):
         :return:           A dict containing metadata to be used by
                            internetarchive library.
         """
-        category = file_meta.get('category') or 'gallery-dl'
+        platform = get_platform_name(file_meta.get('category'))
         pageurl = file_meta.get('webpage_url') or file_meta.get('file_url') or ''
 
         mediatype, collection = GalUp.determine_media_type(file_meta, pageurl)
 
         title = GalUp._first_text(file_meta, ('title', 'post_title')) or \
-            '%s %s' % (category, basename)
+            '%s %s' % (platform, basename)
 
         # Use the uploader's username rather than their display name, as it
         # is stable and unique. Extractors store it differently, e.g.
@@ -654,8 +667,8 @@ class GalUp(object):
             upload_year = time.strftime("%Y")
 
         # load up tags into an IA compatible semicolon-separated string
-        # example: twitter;image;
-        tags_string = '%s;%s;' % (category, mediatype)
+        # example: Twitter;image;
+        tags_string = '%s;%s;' % (platform, mediatype)
 
         tags = []
         for key in ('tags', 'hashtags', 'categories', 'challenges',
