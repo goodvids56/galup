@@ -18,7 +18,8 @@ from gallery_dl import version as gdl_version
 from gallery_dl.job import DownloadJob
 from gallery_dl.postprocessor.metadata import MetadataPP
 from .utils import (get_itemname, get_filename, get_post_name,
-                    get_platform_name, get_thumbnail_url)
+                    get_platform_name, get_thumbnail_url,
+                    get_subtitle_extension)
 from logging import getLogger
 from urllib.parse import urlparse
 
@@ -214,6 +215,10 @@ class GalleryJob(DownloadJob):
         # Used by the default filename format, see `GalUp.generate_gdl_options`
         kwdict['_galup_filename'] = (get_filename(kwdict) or
                                      kwdict.get('filename') or 'file')
+        # gallery-dl takes the extension of subtitles from their URL, which
+        # often has none; use their format instead, e.g. `vtt` for `webvtt`
+        if kwdict.get('type') == 'subtitle' and not kwdict.get('extension'):
+            kwdict['extension'] = get_subtitle_extension(kwdict) or ''
         if self.post_name is None:
             self.post_name = get_post_name(kwdict)
         if self.should_skip is not None:
@@ -453,8 +458,12 @@ class GalUp(object):
                                                      '.gallerydlarchive')
 
         # A TikTok profile link downloads the profile picture besides the
-        # posts by default; only archive the posts
-        extractor_opts['tiktok'] = {'user': {'include': 'posts'}}
+        # posts by default; only archive the posts. Download all subtitles
+        # made by people (`LC`, local or creator captions) to
+        # `{id}.{lang}.{ext}`, but not automatic speech recognition (`ASR`)
+        # or machine translations (`MT`).
+        extractor_opts['tiktok'] = {'user': {'include': 'posts'},
+                                    'subtitles': 'LC'}
 
         return {
             'extractor': extractor_opts,
@@ -520,10 +529,11 @@ class GalUp(object):
 
         # Build the item metadata from its main file: a video if there is
         # one, otherwise an image, e.g. the slides of a TikTok slideshow
-        # rather than its background music, but never the thumbnail.
+        # rather than its background music, but never the thumbnail or
+        # subtitles.
         def file_priority(file):
             extension = str(file[1].get('extension') or '').lower()
-            if file[1].get('type') == 'thumbnail':
+            if file[1].get('type') in ('thumbnail', 'subtitle'):
                 return 3
             if extension in VIDEO_EXTENSIONS:
                 return 0

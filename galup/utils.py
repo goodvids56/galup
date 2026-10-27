@@ -114,15 +114,64 @@ def get_post_id(file_meta):
     return _find_post_id(file_meta)[1]
 
 
+# gallery-dl metadata keys holding the language of a subtitle file, in order
+# of preference
+SUBTITLE_LANG_KEYS = (
+    'subtitle_lang_codename',   # tiktok, e.g. `eng-US`
+    'subtitle_lang',
+    'language',
+    'lang',
+)
+
+
+def get_subtitle_lang(file_meta):
+    """
+    Return the language of a subtitle file from its gallery-dl metadata, or
+    None if the file isn't a subtitle or its language is unknown.
+    """
+    if file_meta.get('type') != 'subtitle':
+        return None
+    for key in SUBTITLE_LANG_KEYS:
+        value = file_meta.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return None
+
+
+# Filename extensions of subtitle formats named by gallery-dl's
+# `subtitle_format`, for those that aren't one
+SUBTITLE_EXTENSIONS = {
+    'webvtt': 'vtt',
+    'creator_caption': 'json',  # tiktok
+}
+
+
+def get_subtitle_extension(file_meta):
+    """
+    Return the filename extension of a subtitle file from the format in its
+    gallery-dl metadata, e.g. `vtt` for `webvtt`, or None if unknown.
+    """
+    sub_format = file_meta.get('subtitle_format')
+    if not isinstance(sub_format, str) or not sub_format.strip():
+        return None
+    sub_format = sub_format.strip().lower()
+    return SUBTITLE_EXTENSIONS.get(sub_format, sub_format)
+
+
 def get_filename(file_meta):
     """
     Build the name of a downloaded file, without its extension, from its
     gallery-dl metadata: `{id}`, or `{id}_{num}` when the post has several
-    files. Returns None if the metadata has no post ID.
+    files, or `{id}.{lang}` for subtitles. Returns None if the metadata has
+    no post ID.
     """
     key, post_id = _find_post_id(file_meta)
     if post_id is None:
         return None
+
+    lang = get_subtitle_lang(file_meta)
+    if lang is not None:
+        return '%s.%s' % (post_id, lang)
 
     # Position of the file in the post. Posts with a single file can still
     # have `num` set (e.g. Twitter), which `count` tells apart.
