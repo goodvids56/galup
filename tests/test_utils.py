@@ -64,6 +64,7 @@ class UtilsTest(unittest.TestCase):
         self.assertEqual(get_platform_name('deviantart'), 'DeviantArt')
         self.assertEqual(get_platform_name('twitter'), 'Twitter')
         self.assertEqual(get_platform_name('pixiv'), 'pixiv')
+        self.assertEqual(get_platform_name('furaffinity'), 'Fur Affinity')
         self.assertEqual(get_platform_name(None), 'gallery-dl')
 
     def test_get_itemname(self):
@@ -73,6 +74,8 @@ class UtilsTest(unittest.TestCase):
             get_itemname('directlink', '/downloads/example.org_media_image'),
             'Directlink-example-org_media_image')
         self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
+        self.assertEqual(get_itemname('furaffinity', '123'),
+                         'Fur-Affinity-123')
         self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
 
     def test_get_itemname_strips_non_ascii(self):
