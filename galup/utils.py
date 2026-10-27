@@ -200,15 +200,166 @@ def get_post_name(post_meta):
     return hashlib.md5(meta.encode('utf-8')).hexdigest()[:16]
 
 
+# Official names of platforms by gallery-dl extractor category, for those
+# whose name isn't just the capitalized category (see `get_platform_name`).
+# Taken from the CATEGORY_MAP of gallery-dl's scripts/supportedsites.py.
+# Spaces become hyphens in archive.org identifiers (see `get_itemname`).
+PLATFORM_NAMES = {
+    '35photo':          '35PHOTO',
+    'adultempire':      'Adult Empire',
+    'agnph':            'AGNPH',
+    'ahottie':          'AHottie',
+    'aibooru':          'AIBooru',
+    'allporncomic':     'AllPornComic',
+    'archiveofsins':    'Archive of Sins',
+    'artstation':       'ArtStation',
+    'atfbooru':         'ATFBooru',
+    'azurlanewiki':     'Azur Lane Wiki',
+    'baraag':           'baraag',
+    'bbc':              'BBC',
+    'blacktowhite':     'BlacktoWhite',
+    'booth':            'BOOTH',
+    'celebforum':       'celebforum',
+    'comicvine':        'Comic Vine',
+    'cyberfile':        'CyberFile',
+    'deviantart':       'DeviantArt',
+    'drawfriends':      'Draw Friends',
+    'e621':             'e621',
+    'e6ai':             'e6AI',
+    'e926':             'e926',
+    'eporner':          'EPORNER',
+    'erome':            'EroMe',
+    'fanbox':           'pixivFANBOX',
+    'fashionnova':      'Fashion Nova',
+    'fikfap':           'FikFap',
+    'fitnakedgirls':    'FitNakedGirls',
+    'foriio':           'foriio',
+    'furaffinity':      'Fur Affinity',
+    'girlswithmuscle':  'Girls with Muscle',
+    'hatenablog':       'HatenaBlog',
+    'hbrowse':          'HBrowse',
+    'hentai2read':      'Hentai2Read',
+    'hentaicosplay':    'Hentai Cosplay',
+    'hentaienvy':       'HentaiEnvy',
+    'hentaiera':        'HentaiEra',
+    'hentaifoundry':    'Hentai Foundry',
+    'hentaifox':        'HentaiFox',
+    'hentaihand':       'HentaiHand',
+    'hentaihere':       'HentaiHere',
+    'hentainexus':      'HentaiNexus',
+    'hentairox':        'HentaiRox',
+    'hentaizap':        'HentaiZap',
+    'hiperdex':         'HiperDEX',
+    'horne':            'horne',
+    'idolcomplex':      'Idol Complex',
+    'imagebam':         'ImageBam',
+    'imagechest':       'ImageChest',
+    'imagefap':         'ImageFap',
+    'imagepond':        'ImagePond',
+    'imageshack':       'ImageShack',
+    'imagetwist':       'ImageTwist',
+    'imgadult':         'ImgAdult',
+    'imgbb':            'ImgBB',
+    'imgbox':           'imgbox',
+    'imgpile':          'imgpile',
+    'imgpv':            'IMGPV',
+    'imgth':            'imgth',
+    'imhentai':         'IMHentai',
+    'joyreactor':       'JoyReactor',
+    'jpgfish':          'JPG Fish',
+    'kaliscan':         'KaliScan',
+    'leakgallery':      'Leak Gallery',
+    'lofter':           'LOFTER',
+    'mangadex':         'MangaDex',
+    'mangafire':        'MangaFire',
+    'mangafox':         'Manga Fox',
+    'mangafreak':       'MangaFreak',
+    'mangahere':        'Manga Here',
+    'mangakakalot':     'MangaKakalot',
+    'manganato':        'MangaNato',
+    'mangapark':        'MangaPark',
+    'mangaread':        'MangaRead',
+    'mangareader':      'MangaReader',
+    'mangataro':        'MangaTaro',
+    'mangatown':        'MangaTown',
+    'mediawiki':        'MediaWiki',
+    'micmicidol':       'MIC MIC IDOL',
+    'mixdrop':          'MixDrop',
+    'myhentaigallery':  'My Hentai Gallery',
+    'nhentai':          'nhentai',
+    'nijie':            'nijie',
+    'ohpolly':          'Oh Polly',
+    'omgmiamiswimwear': 'Omg Miami Swimwear',
+    'pholder':          'pholder',
+    'photovogue':       'PhotoVogue',
+    'picstate':         'PicState',
+    'pidgiwiki':        'PidgiWiki',
+    'pixeldrain':       'pixeldrain',
+    'pixhost':          'PiXhost',
+    'pixiv':            'pixiv',
+    'pornimage':        'Porn Image',
+    'pornreactor':      'PornReactor',
+    'readcomiconline':  'Read Comic Online',
+    'redgifs':          'RedGIFs',
+    'rozenarcana':      'Rozen Arcana',
+    'rule34':           'Rule 34',
+    'rule34hentai':     'Rule34Hentai',
+    'rule34world':      'Rule 34 World',
+    'rule34xyz':        'Rule 34 XYZ',
+    'sankakucomplex':   'Sankaku Complex',
+    'schalenetwork':    'Schale Network',
+    'senmanga':         'Sen Manga',
+    'simplyhentai':     'Simply Hentai',
+    'sizebooru':        'Size Booru',
+    'slickpic':         'SlickPic',
+    'slideshare':       'SlideShare',
+    'smugmug':          'SmugMug',
+    'speakerdeck':      'Speaker Deck',
+    'steamgriddb':      'SteamGridDB',
+    'subscribestar':    'SubscribeStar',
+    'tcbscans':         'TCB Scans',
+    'thatpervert':      'ThatPervert',
+    'thefap':           'TheFap',
+    'thehentaiworld':   'The Hentai World',
+    'tiktok':           'TikTok',
+    'tmohentai':        'TMOHentai',
+    'tumblrgallery':    'TumblrGallery',
+    'visuabusters':     'VISUABUSTERS',
+    'vk':               'VK',
+    'vsco':             'VSCO',
+    'wallpapercave':    'Wallpaper Cave',
+    'webmshare':        'webmshare',
+    'weebcentral':      'Weeb Central',
+    'weebdex':          'WeebDex',
+    'wikimediacommons': 'Wikimedia Commons',
+    'xbunkr':           'xBunkr',
+    'xhamster':         'xHamster',
+    'xvideos':          'XVideos',
+    'yiffverse':        'Yiff verse',
+    'yourlesbians':     'YourLesbians',
+}
+
+
+def get_platform_name(category):
+    """
+    Return the official name of a platform from its gallery-dl extractor
+    category, e.g. `TikTok` for `tiktok` or `Twitter` for `twitter`.
+    """
+    if not category:
+        return 'gallery-dl'
+    return PLATFORM_NAMES.get(category) or category.capitalize()
+
+
 def get_itemname(category, post_name):
     """
     Build an archive.org identifier, `{platform}-{id}`, from a gallery-dl
     extractor category and the name of a post (see `get_post_name`).
     """
-    # Remove illegal characters in identifier; archive.org identifiers are
-    # limited to 100 characters
+    # Remove illegal characters in identifier, e.g. the spaces of platform
+    # names like `Fur Affinity`; archive.org identifiers are limited to 100
+    # characters
     return sanitize_identifier('%s-%s' % (
-        category or 'gallery-dl',
+        get_platform_name(category),
         os.path.basename(post_name),
     ))[:100]
 

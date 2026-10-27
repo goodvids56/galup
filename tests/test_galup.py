@@ -25,18 +25,18 @@ TWEET_URL = 'https://x.com/example_artist/status/1700000000000000001'
 # gallery-dl metadata of the tweet's image
 TWEET_GDL_META = 'twitter_1700000000000000001_1.info.json'
 TWEET_BASENAME = '1700000000000000001'
-TWEET_ITEMNAME = 'twitter-1700000000000000001'
+TWEET_ITEMNAME = 'Twitter-1700000000000000001'
 
 TWEET_METADATA = {
     'mediatype': 'image',
     'creator': 'example_artist',
     'collection': 'opensource_image',
-    'title': 'twitter %s' % TWEET_BASENAME,
+    'title': 'Twitter %s' % TWEET_BASENAME,
     'description': ('Mountain sketch, finished today<br>'
                     'Thanks for looking! #art #mountains'),
     'date': '2023-09-08',
     'year': '2023',
-    'subject': 'twitter;image;art;mountains;',
+    'subject': 'Twitter;image;art;mountains;',
     'originalurl': TWEET_URL,
     'licenseurl': '',
     'scanner': SCANNER,
@@ -182,7 +182,8 @@ class GalUpTests(unittest.TestCase):
                 'postprocessors': [{
                     'name': 'metadata',
                     'event': 'post',
-                    'filename': '{_galup_post}.info.json'}]},
+                    'filename': '{_galup_post}.info.json'}],
+                'tiktok': {'user': {'include': 'posts'}}},
             'downloader': {
                 'part': True,
                 'retries': 9001},
@@ -355,7 +356,7 @@ class GalUpTests(unittest.TestCase):
             vid_meta, TWEET_BASENAME)
 
         self.assertEqual(result['subject'],
-                         'danbooru;image;mountain;landscape;sky;')
+                         'Danbooru;image;mountain;landscape;sky;')
 
     def test_create_archive_org_metadata_from_gallerydl_meta_tiktok(self):
         tiktok_meta = {
@@ -377,7 +378,7 @@ class GalUpTests(unittest.TestCase):
             tiktok_meta, 'x')
 
         self.assertEqual(result['description'], 'All love! #fyp #china #中国人')
-        self.assertEqual(result['subject'], 'tiktok;image;fyp;china;中国人;')
+        self.assertEqual(result['subject'], 'TikTok;image;fyp;china;中国人;')
         self.assertEqual(result['creator'], 'blossom_lovecn')
 
     def test_create_archive_org_metadata_from_gallerydl_meta_mass_of_tags(self):
@@ -528,7 +529,7 @@ class GalUpTests(unittest.TestCase):
                         f.write(b'data')
                     self.on_file(filepath, kwdict, page_url, post_basename)
 
-        itemname = 'tiktok-7700361800876920077'
+        itemname = 'TikTok-7700361800876920077'
         try:
             with requests_mock.Mocker() as m, \
                     patch('galup.GalUp.GalleryJob', SlideshowJob), \
@@ -637,6 +638,26 @@ class GalleryJobTests(unittest.TestCase):
     def on_file(self, filepath, kwdict, page_url, post_basename):
         self.reported.append((filepath, kwdict['category'], page_url,
                               post_basename))
+
+    def test_tiktok_profile_skips_avatar(self):
+        extr = gdl_extractor.find('https://www.tiktok.com/@someone')
+        extr.initialize()
+        queued = [url for _, url, _ in extr.items()]
+
+        self.assertEqual(queued, ['https://www.tiktok.com/@someone/posts'])
+
+    def test_apply_gdl_options_keeps_user_subsection_options(self):
+        from gallery_dl import config as gdl_config
+        with patch.object(gdl_config, 'load',
+                          lambda: gdl_config.set(('extractor', 'tiktok'),
+                                                 'cookies', 'cookies.txt')):
+            self.tu.apply_gdl_options(self.tu.generate_gdl_options())
+
+        self.assertEqual(gdl_config.get(('extractor', 'tiktok'), 'cookies'),
+                         'cookies.txt')
+        self.assertEqual(
+            gdl_config.get(('extractor', 'tiktok', 'user'), 'include'),
+            'posts')
 
     def test_reports_downloaded_file(self):
         with requests_mock.Mocker() as m:

@@ -2,7 +2,7 @@ import unittest
 import os
 from galup.utils import (sanitize_identifier, check_is_file_empty,
                          get_itemname, get_filename, get_post_name,
-                         get_thumbnail_url)
+                         get_platform_name, get_thumbnail_url)
 
 
 class UtilsTest(unittest.TestCase):
@@ -59,13 +59,23 @@ class UtilsTest(unittest.TestCase):
         self.assertNotEqual(name, get_post_name({'category': 'example',
                                                  'title': 'b'}))
 
+    def test_get_platform_name(self):
+        self.assertEqual(get_platform_name('tiktok'), 'TikTok')
+        self.assertEqual(get_platform_name('deviantart'), 'DeviantArt')
+        self.assertEqual(get_platform_name('twitter'), 'Twitter')
+        self.assertEqual(get_platform_name('pixiv'), 'pixiv')
+        self.assertEqual(get_platform_name('furaffinity'), 'Fur Affinity')
+        self.assertEqual(get_platform_name(None), 'gallery-dl')
+
     def test_get_itemname(self):
         self.assertEqual(get_itemname('tiktok', '7700361800876920077'),
-                         'tiktok-7700361800876920077')
+                         'TikTok-7700361800876920077')
         self.assertEqual(
             get_itemname('directlink', '/downloads/example.org_media_image'),
-            'directlink-example-org_media_image')
+            'Directlink-example-org_media_image')
         self.assertEqual(get_itemname(None, 'image'), 'gallery-dl-image')
+        self.assertEqual(get_itemname('furaffinity', '123'),
+                         'Fur-Affinity-123')
         self.assertEqual(len(get_itemname('pixiv', 'x' * 200)), 100)
 
     def test_get_itemname_strips_non_ascii(self):
@@ -75,7 +85,7 @@ class UtilsTest(unittest.TestCase):
             '[7686696195469609741]')
         self.assertEqual(
             itemname,
-            'tiktok-7700361800876920077-Educational---fyp------------'
+            'TikTok-7700361800876920077-Educational---fyp------------'
             '7686696195469609741-')
         self.assertRegex(itemname, r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{4,100}$')
 

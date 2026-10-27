@@ -14,7 +14,7 @@ galup - a gallery-dl to Archive.org uploader
 
 The original Tubeup was designed by the [Bibliotheca Anonoma](https://github.com/bibanon/bibanon/wiki) to archive videos to the Internet Archive. This fork applies the same approach to everything gallery-dl can download: single posts, galleries, user profiles and so on.
 
-Each post gets its own Archive.org item, identified as `{platform}-{id}` (for example `tiktok-7700361800876920077` or `twitter-1700000000000000001`), just like TubeUp. All files of the post (e.g. every image of a gallery or slideshow) go into that item, together with one `{id}.info.json` file containing the post's metadata, written by gallery-dl's own metadata post processor. When the post's metadata has a thumbnail (e.g. the cover of a TikTok video), it is saved as `{id}.thumbnail.{ext}` too, unless the post is a single image. Files are named `{id}.{ext}`, or `{id}_{num}.{ext}` when a post has several files (e.g. `7700361800876920077_1.jpg`). When gallery-dl doesn't report a post ID, the identifier falls back to `{platform}-{filename}` and the file keeps its original name. Images go to the [Community Images](https://archive.org/details/opensource_image) collection, videos to [Community Video](https://archive.org/details/opensource_movies) and audio to [Community Audio](https://archive.org/details/opensource_audio), unless you choose another collection with `--metadata`.
+Each post gets its own Archive.org item, identified as `{platform}-{id}` (for example `TikTok-7700361800876920077` or `Twitter-1700000000000000001`), just like TubeUp. The platform is written with its official name and capitalization, in the item's tags too; spaces in it become hyphens in the identifier (e.g. `Fur-Affinity-{id}`). All files of the post (e.g. every image of a gallery or slideshow) go into that item, together with one `{id}.info.json` file containing the post's metadata, written by gallery-dl's own metadata post processor. When the post's metadata has a thumbnail (e.g. the cover of a TikTok video), it is saved as `{id}.thumbnail.{ext}` too, unless the post is a single image. Files are named `{id}.{ext}`, or `{id}_{num}.{ext}` when a post has several files (e.g. `7700361800876920077_1.jpg`). When gallery-dl doesn't report a post ID, the identifier falls back to `{platform}-{filename}` and the file keeps its original name. Images go to the [Community Images](https://archive.org/details/opensource_image) collection, videos to [Community Video](https://archive.org/details/opensource_movies) and audio to [Community Audio](https://archive.org/details/opensource_audio), unless you choose another collection with `--metadata`.
 
 ## Prerequisites
 
@@ -68,7 +68,7 @@ Then run this to add pipx path to your shell RC file:
 You will be prompted for your login credentials for the Internet Archive account you use. Once configured to upload, you're ready to go.
 
 
-5. Start archiving by running the script on a URL (or multiple URLs) [supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md). Depending on the site, this includes single posts, galleries and user profiles.
+5. Start archiving by running the script on a URL (or multiple URLs) [supported by gallery-dl](https://codeberg.org/mikf/gallery-dl/src/branch/master/docs/supportedsites.md). Depending on the site, this includes single posts, galleries and user profiles. For a TikTok profile, only its posts are archived, not the profile picture.
 
 ```
     galup <url>
