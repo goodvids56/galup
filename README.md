@@ -21,7 +21,7 @@ Each post gets its own Archive.org item, identified as `{platform}-{id}` (for ex
 This script strongly recommends Linux or some sort of POSIX system (such as macOS), preferably from a VPS or Linux/Unix shell you have access to.
 
 Recommended system specifications:
-- Linux VPS with Python 3.10 or higher, with `pipx` installed
+- Linux VPS with Python 3.11 or higher, with `pipx` installed
 - 2GB of RAM, 100GB of storage or much more for anything other than a few single posts. If your OS drive is too small, `symlink` it to something larger.
 
 ## Setup and Installation
