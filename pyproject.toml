@@ -11,7 +11,7 @@ authors = [
     {name = "galup contributors"}
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 dependencies = [
