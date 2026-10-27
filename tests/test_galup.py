@@ -324,6 +324,66 @@ class GalUpTests(unittest.TestCase):
 
         self.assertEqual(result, expected)
 
+    def test_determine_post_url(self):
+        cases = [
+            # TikTok videos and slideshows of a profile
+            ({'category': 'tiktok', 'id': '7695923970339654942',
+              'user': 'untreatedloser', 'post_type': 'video'},
+             'https://www.tiktok.com/@untreatedloser/video/'
+             '7695923970339654942'),
+            ({'category': 'tiktok', 'id': '7700361800876920077',
+              'user': 'user', 'post_type': 'image'},
+             'https://www.tiktok.com/@user/photo/7700361800876920077'),
+            ({'category': 'twitter', 'tweet_id': 17,
+              'author': {'name': 'example_artist'}},
+             'https://x.com/example_artist/status/17'),
+            ({'category': 'twitter', 'tweet_id': 17},
+             'https://x.com/i/status/17'),
+            ({'category': 'reddit', 'permalink': '/r/pics/comments/abc/x/'},
+             'https://www.reddit.com/r/pics/comments/abc/x/'),
+            ({'category': 'bluesky', 'post_id': '3kxyz',
+              'author': {'handle': 'someone.bsky.social'}},
+             'https://bsky.app/profile/someone.bsky.social/post/3kxyz'),
+            ({'category': 'instagram',
+              'post_url': 'https://www.instagram.com/p/C0de/'},
+             'https://www.instagram.com/p/C0de/'),
+            # Unknown
+            ({'category': 'tiktok', 'id': '7695923970339654942', 'user': ''},
+             None),
+            ({'category': 'directlink', 'id': '1'}, None),
+        ]
+        self.assertEqual([GalUp.determine_post_url(meta) for meta, _ in cases],
+                         [url for _, url in cases])
+
+    def test_get_resource_basenames_uses_post_url_of_profile_posts(self):
+        tu = GalUp(dir_path=os.path.join(current_path, 'test_galup_rootdir'))
+        post = {'category': 'tiktok', 'subcategory': 'posts',
+                'id': '7695923970339654942', 'user': 'untreatedloser',
+                'post_type': 'video', 'extension': 'mp4'}
+
+        class ProfileJob(object):
+            def __init__(self, url, on_file=None, should_skip=None):
+                self.url, self.on_file = url, on_file
+
+            def run(self):
+                self.on_file('/video.mp4', post, self.url, '/7695923970339654942')
+
+        with patch('galup.GalUp.GalleryJob', ProfileJob), \
+                patch.object(GalUp, 'apply_gdl_options'):
+            result = tu.get_resource_basenames(
+                ['https://www.tiktok.com/@untreatedloser/posts'],
+                ignore_existing_item=True)
+
+        meta = result['/7695923970339654942']['/video.mp4']
+        self.assertEqual(meta['webpage_url'],
+                         'https://www.tiktok.com/@untreatedloser/video/'
+                         '7695923970339654942')
+        self.assertEqual(
+            tu.create_archive_org_metadata_from_gallerydl_meta(
+                meta, '7695923970339654942')['originalurl'],
+            'https://www.tiktok.com/@untreatedloser/video/'
+            '7695923970339654942')
+
     def test_create_archive_org_metadata_from_gallerydl_meta_no_channel(self):
         result = GalUp.create_archive_org_metadata_from_gallerydl_meta(
             {'category': 'directlink'}, 'x')
