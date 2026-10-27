@@ -10,7 +10,10 @@ from datetime import datetime
 from gallery_dl import config as gdl_config
 from gallery_dl import exception as gdl_exception
 from gallery_dl import text as gdl_text
+from gallery_dl import util as gdl_util
+from gallery_dl import version as gdl_version
 from gallery_dl.job import DownloadJob
+from gallery_dl.postprocessor.metadata import MetadataPP
 from .utils import (get_itemname, get_filename, get_post_name,
                     get_platform_name, get_thumbnail_url)
 from logging import getLogger
@@ -36,6 +39,29 @@ CHANNEL_URLS = {
     'tiktok': 'https://www.tiktok.com/@{username}',
     'twitter': 'https://x.com/{username}',
 }
+
+
+def get_gdl_version_info():
+    """
+    Version info of gallery-dl, written as `_version` at the end of each
+    post's .info.json.
+    """
+    version_info = {'version': gdl_version.__version__}
+    # Only known when gallery-dl runs from a git checkout
+    git_head = gdl_util.git_head()
+    if git_head:
+        version_info['release_git_head'] = git_head
+    version_info['repository'] = 'mikf/gallery-dl'
+    return version_info
+
+
+def filter_info_json(kwdict):
+    """
+    Leave out private keys from a post's .info.json, like gallery-dl's
+    metadata post processor does, except `_version`.
+    """
+    return {key: value for key, value in kwdict.items()
+            if key[0] != '_' or key == '_version'}
 
 
 class GalleryJob(DownloadJob):
@@ -65,6 +91,13 @@ class GalleryJob(DownloadJob):
 
     def initialize(self, kwdict=None):
         DownloadJob.initialize(self, kwdict)
+        # Keep `_version` in the .info.json written by gallery-dl's metadata
+        # post processor, which leaves out private keys by default
+        for callback in self.hooks.get('post', ()):
+            pp = getattr(callback, '__self__', None)
+            if isinstance(pp, MetadataPP) and \
+                    pp.filter is gdl_util.filter_dict:
+                pp.filter = filter_info_json
         if self.on_file is None:
             return
         if not self.hooks:
@@ -82,6 +115,7 @@ class GalleryJob(DownloadJob):
         self.post_kwdict = kwdict
         self.post_files = []
         kwdict['_galup_post'] = self.post_name
+        kwdict['_version'] = get_gdl_version_info()
         DownloadJob.handle_directory(self, kwdict)
 
     def handle_finalize(self):

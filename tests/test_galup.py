@@ -726,11 +726,19 @@ class GalleryJobTests(unittest.TestCase):
              ('102_1.jpg', os.path.join(user_dir, '102')),
              ('102_2.jpg', os.path.join(user_dir, '102'))])
 
-        # One .info.json per post, with gallery-dl's metadata of the post
+        # One .info.json per post, with gallery-dl's metadata of the post,
+        # ending with gallery-dl's version info
+        from gallery_dl import version as gdl_version
         with open(os.path.join(user_dir, '102.info.json')) as f:
-            self.assertEqual(json.load(f), {
-                'id': '102', 'user': 'someone', 'title': 'Post 102',
-                'category': 'galuptest', 'subcategory': 'user'})
+            post_meta = json.load(f)
+        self.assertEqual(list(post_meta)[-1], '_version')
+        version_info = post_meta.pop('_version')
+        self.assertEqual(post_meta, {
+            'id': '102', 'user': 'someone', 'title': 'Post 102',
+            'category': 'galuptest', 'subcategory': 'user'})
+        self.assertEqual(version_info['version'], gdl_version.__version__)
+        self.assertEqual(version_info['repository'], 'mikf/gallery-dl')
+        self.assertEqual(list(version_info)[-1], 'repository')
 
     def test_downloads_thumbnail_of_post(self):
         with requests_mock.Mocker() as m:
