@@ -1,5 +1,8 @@
 import os
 import re
+import json
+import functools
+import importlib.metadata
 import time
 import logging
 import collections
@@ -29,6 +32,10 @@ VIDEO_EXTENSIONS = {'mp4', 'webm', 'mkv', 'mov', 'avi', 'flv', 'm4v', 'wmv',
 AUDIO_EXTENSIONS = {'mp3', 'm4a', 'ogg', 'opus', 'flac', 'wav', 'aac', 'wma'}
 IMAGE_EXTENSIONS = {'jpg', 'jpeg', 'png', 'webp', 'gif', 'avif', 'heic', 'bmp'}
 
+# Written as the repository of gallery-dl in each post's .info.json when the
+# installed gallery-dl doesn't name one
+DEFAULT_GDL_REPOSITORY = 'mikf/gallery-dl'
+
 # Profile URLs of uploaders by gallery-dl category, used for the `channel`
 # metadata
 CHANNEL_URLS = {
@@ -41,18 +48,61 @@ CHANNEL_URLS = {
 }
 
 
+def get_repository(url):
+    """
+    Get the `owner/repo` part of a repository URL, e.g. `mikf/gallery-dl`
+    from `https://github.com/mikf/gallery-dl.git`, or None.
+    """
+    url = urlparse(url or '')
+    if not url.netloc or url.scheme == 'file':
+        return None
+    parts = url.path.strip('/').split('/')
+    if len(parts) < 2:
+        return None
+    owner, repo = parts[0], parts[1]
+    if repo.endswith('.git'):
+        repo = repo[:-4]
+    return f'{owner}/{repo}' if owner and repo else None
+
+
+@functools.lru_cache(maxsize=None)
+def get_gdl_repository():
+    """
+    Repository of the installed gallery-dl: the one it was installed from
+    with pip (e.g. a fork, `pip install git+https://github.com/...`),
+    otherwise the project URL in its package metadata.
+    """
+    try:
+        dist = importlib.metadata.distribution('gallery-dl')
+    except importlib.metadata.PackageNotFoundError:
+        return DEFAULT_GDL_REPOSITORY
+
+    urls = []
+    try:
+        urls.append(json.loads(dist.read_text('direct_url.json') or
+                               'null')['url'])
+    except (TypeError, KeyError, ValueError):
+        pass
+    for project_url in dist.metadata.get_all('Project-URL') or ():
+        urls.append(project_url.partition(',')[2].strip())
+    urls.append(dist.metadata.get('Home-page'))
+
+    for url in urls:
+        repository = get_repository(url)
+        if repository:
+            return repository
+    return DEFAULT_GDL_REPOSITORY
+
+
 def get_gdl_version_info():
     """
     Version info of gallery-dl, written as `_version` at the end of each
     post's .info.json.
     """
-    version_info = {'version': gdl_version.__version__}
-    # Only known when gallery-dl runs from a git checkout
-    git_head = gdl_util.git_head()
-    if git_head:
-        version_info['release_git_head'] = git_head
-    version_info['repository'] = 'mikf/gallery-dl'
-    return version_info
+    return {
+        'version': gdl_version.__version__,
+        'repository': get_gdl_repository(),
+    }
 
 
 def filter_info_json(kwdict):

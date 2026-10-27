@@ -6,10 +6,12 @@ import re
 import time
 import requests_mock
 import glob
+import email
 import logging
 
 
-from galup.GalUp import GalUp, GalleryJob, DOWNLOAD_DIR_NAME
+from galup.GalUp import (GalUp, GalleryJob, DOWNLOAD_DIR_NAME,
+                         get_repository, get_gdl_repository)
 from galup.utils import get_filename
 from galup import __version__
 from unittest.mock import patch
@@ -737,8 +739,43 @@ class GalleryJobTests(unittest.TestCase):
             'id': '102', 'user': 'someone', 'title': 'Post 102',
             'category': 'galuptest', 'subcategory': 'user'})
         self.assertEqual(version_info['version'], gdl_version.__version__)
-        self.assertEqual(version_info['repository'], 'mikf/gallery-dl')
+        self.assertEqual(version_info, {
+            'version': gdl_version.__version__,
+            'repository': get_gdl_repository()})
         self.assertEqual(list(version_info)[-1], 'repository')
+
+    def test_get_repository(self):
+        self.assertEqual(
+            get_repository('https://github.com/someone/gallery-dl.git'),
+            'someone/gallery-dl')
+        self.assertEqual(
+            get_repository('https://codeberg.org/mikf/gallery-dl'),
+            'mikf/gallery-dl')
+        self.assertEqual(
+            get_repository('ssh://git@github.com/someone/gallery-dl.git'),
+            'someone/gallery-dl')
+        self.assertIsNone(get_repository('file:///home/someone/gallery-dl'))
+        self.assertIsNone(get_repository('https://gallery-dl.org/'))
+        self.assertIsNone(get_repository(None))
+
+    def test_get_gdl_repository_of_fork(self):
+        class FakeDistribution(object):
+            metadata = email.message_from_string(
+                'Home-page: https://codeberg.org/mikf/gallery-dl\n')
+
+            def read_text(self, filename):
+                if filename == 'direct_url.json':
+                    return json.dumps({
+                        'url': 'https://github.com/someone/gallery-dl.git',
+                        'vcs_info': {'vcs': 'git'}})
+
+        get_gdl_repository.cache_clear()
+        try:
+            with patch('importlib.metadata.distribution',
+                       return_value=FakeDistribution()):
+                self.assertEqual(get_gdl_repository(), 'someone/gallery-dl')
+        finally:
+            get_gdl_repository.cache_clear()
 
     def test_downloads_thumbnail_of_post(self):
         with requests_mock.Mocker() as m:
