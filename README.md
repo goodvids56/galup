@@ -49,7 +49,7 @@ Then run this to add pipx path to your shell RC file:
 2. Use pipx to install galup. gallery-dl and internetarchive are installed with it as dependencies, and `--include-deps` also puts their `gallery-dl` and `ia` commands on your path.
 
 ```
-    pipx install --include-deps git+https://github.com/goodvids56/galup.git
+    pipx install --include-deps galup
 ```
 
 
